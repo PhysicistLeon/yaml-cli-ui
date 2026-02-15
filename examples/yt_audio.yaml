@@ -1,0 +1,44 @@
+version: 1
+
+app:
+  title: CLI YAML Pipeline Engine
+  platform: windows
+  shell: false
+
+actions:
+  yt_audio:
+    title: Download audio
+    form:
+      fields:
+        - id: url
+          type: string
+          required: true
+        - id: bitrate
+          type: choice
+          options: ["128K", "192K", "320K"]
+          default: "192K"
+        - id: embed
+          type: tri_bool
+          default: auto
+    pipeline:
+      - id: ensure_dir
+        run:
+          program: powershell
+          argv:
+            - -NoProfile
+            - -Command
+            - New-Item -ItemType Directory -Force -Path '${home}\\Downloads\\yt' | Out-Null
+      - id: download
+        run:
+          program: yt-dlp
+          argv:
+            - "--extract-audio": true
+            - "--audio-format": mp3
+            - opt: --audio-quality
+              from: "${form.bitrate}"
+              mode: value
+            - opt: --embed-thumbnail
+              from: "${form.embed}"
+              mode: flag
+              false_opt: --no-embed-thumbnail
+            - "${form.url}"
