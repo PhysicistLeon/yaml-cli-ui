@@ -616,7 +616,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="YAML-driven CLI UI")
     parser.add_argument("config", nargs="?", default=None)
-    parser.add_argument("--settings", help="Path to INI file with [ui] default_yaml and browse_dir.")
+    parser.add_argument("--settings", help="Path to INI file with [ui] default_yaml and browse_dir.", default='app.ini')
     args = parser.parse_args()
 
     settings = load_launch_settings(args.settings)
