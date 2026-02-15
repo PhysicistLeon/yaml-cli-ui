@@ -26,6 +26,15 @@ actions:
           argv:
             - "tests\\timer.py"
 
+  run_script2:
+    title: "Run Python script 2"
+    pipeline:
+      - id: run
+        run:
+          program: python
+          argv:
+            - "tests\\timer copy.py"
+
   yt_audio:
     title: Download audio
     form:
