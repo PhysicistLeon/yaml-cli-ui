@@ -5,8 +5,8 @@
 Build a **Python application** that:
 
 * Loads a YAML file describing a CLI-driven workflow.
-* Automatically builds a simple UI (form + buttons) from that YAML.
-* Collects user inputs.
+* Shows top-level actions as a set of quick-launch buttons.
+* Opens a modal parameter dialog for the selected action and collects user inputs.
 * Executes a **pipeline of CLI steps**.
 * Safely constructs subprocess calls using an **argv list (NOT shell strings)**.
 * Supports batch operations, conditional steps, and reusable variables.
@@ -22,10 +22,11 @@ The project is complete when:
    * execution pipeline
 2. The program can:
 
-   * render the form
+   * render top-level action buttons
+   * open per-action parameter forms in modal dialogs
    * validate inputs
    * assemble argv deterministically
-   * run steps sequentially
+   * run independent actions in parallel
 3. Switching YAML files immediately changes the interface and behavior.
 4. No code changes are required to add new commands/workflows.
 5. Works reliably on Windows.
@@ -607,3 +608,13 @@ Avoid:
 ---
 
 END OF CONTEXT
+
+
+## 4. UX behavior (current app)
+
+- Main window lists top-level `actions` as buttons (no action dropdown).
+- Clicking a button opens the parameter dialog only when editable fields exist; otherwise the action starts immediately.
+- Validation errors prevent launch and do not change action status color.
+- Action status colors: idle = neutral, running = yellow, success = green, failed = red.
+- Output uses tabs: aggregate `All runs` + one tab per action.
+- Each action tab includes run history selector so previous outputs remain available.
