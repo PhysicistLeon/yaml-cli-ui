@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -19,6 +20,7 @@ class App(tk.Tk):
         self.config_path = Path(config_path)
         self.config: dict[str, Any] = {}
         self.engine: PipelineEngine | None = None
+        self.is_running = False
 
         self.action_var = tk.StringVar()
         self.fields: dict[str, tuple[dict[str, Any], Any]] = {}
@@ -38,7 +40,8 @@ class App(tk.Tk):
         self.action_combo = ttk.Combobox(action_row, state="readonly", textvariable=self.action_var)
         self.action_combo.pack(side="left", fill="x", expand=True, padx=6)
         self.action_combo.bind("<<ComboboxSelected>>", lambda _e: self.build_form())
-        ttk.Button(action_row, text="Run", command=self.run_action).pack(side="left")
+        self.run_button = ttk.Button(action_row, text="Run", command=self.run_action)
+        self.run_button.pack(side="left")
 
         self.form_frame = ttk.Frame(self)
         self.form_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -56,10 +59,13 @@ class App(tk.Tk):
             self.path_entry.insert(0, selected)
             self.load_config()
 
-    def log(self, msg: str) -> None:
+    def _append_log(self, msg: str) -> None:
         self.output.insert("end", msg + "\n")
         self.output.see("end")
         self.update_idletasks()
+
+    def log(self, msg: str) -> None:
+        self.after(0, self._append_log, msg)
 
     def load_config(self) -> None:
         try:
@@ -190,17 +196,34 @@ class App(tk.Tk):
             raise EngineError("\n".join(errors))
         return data
 
-    def run_action(self) -> None:
-        if not self.engine:
-            return
+    def _set_running(self, running: bool) -> None:
+        self.is_running = running
+        self.run_button.config(state="disabled" if running else "normal")
+
+    def _run_action_worker(self, action_id: str, form: dict[str, Any]) -> None:
+        assert self.engine is not None
         try:
-            self.output.delete("1.0", "end")
-            form = self.collect_form()
-            results = self.engine.run_action(self.action_var.get(), form, self.log)
+            results = self.engine.run_action(action_id, form, self.log)
             self.log("Done")
             self.log(json.dumps(results, ensure_ascii=False, indent=2))
         except Exception as exc:
+            self.after(0, messagebox.showerror, "Execution error", str(exc))
+        finally:
+            self.after(0, self._set_running, False)
+
+    def run_action(self) -> None:
+        if not self.engine or self.is_running:
+            return
+        try:
+            form = self.collect_form()
+        except Exception as exc:
             messagebox.showerror("Execution error", str(exc))
+            return
+
+        self.output.delete("1.0", "end")
+        self._set_running(True)
+        worker = threading.Thread(target=self._run_action_worker, args=(self.action_var.get(), form), daemon=True)
+        worker.start()
 
 
 def main() -> None:

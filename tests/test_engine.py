@@ -1,3 +1,5 @@
+import io
+
 from yaml_cli_ui.engine import PipelineEngine, SafeEvaluator, render_template, to_dotdict
 
 
@@ -42,3 +44,15 @@ def test_argv_serialization_modes():
         "ru,en",
         "--no-switch",
     ]
+
+
+def test_stream_output_handles_carriage_return_progress():
+    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+    stream = io.StringIO("10%\r20%\rdone\n")
+    captured = []
+    logs = []
+
+    engine._stream_output("stderr", stream, captured, logs.append)
+
+    assert captured == ["10%", "20%", "done"]
+    assert logs == ["[stderr] 10%", "[stderr] 20%", "[stderr] done"]

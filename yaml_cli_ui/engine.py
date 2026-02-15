@@ -5,10 +5,11 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 
 TEMPLATE_RE = re.compile(r"\$\{([^{}]+)\}")
@@ -146,7 +147,6 @@ class PipelineEngine:
             ctx.update(extra)
         evalr = SafeEvaluator(ctx)
 
-        # render vars defaults with context available
         for key, val in list(resolved_vars.items()):
             resolved_vars[key] = render_template(val, evalr)
         ctx["vars"] = to_dotdict(resolved_vars)
@@ -293,6 +293,23 @@ class PipelineEngine:
                     continue
                 raise
 
+    def _stream_output(self, name: str, stream: TextIO, collector: list[str], log: callable[[str], None]) -> None:
+        buffer = ""
+        while True:
+            chunk = stream.read(1)
+            if chunk == "":
+                break
+            if chunk in ("\n", "\r"):
+                if buffer:
+                    collector.append(buffer)
+                    log(f"[{name}] {buffer}")
+                    buffer = ""
+            else:
+                buffer += chunk
+        if buffer:
+            collector.append(buffer)
+            log(f"[{name}] {buffer}")
+
     def _run_command(self, step_id: str, run_def: dict[str, Any], evaluator: SafeEvaluator, log: callable[[str], None]) -> StepResult:
         program = str(render_template(run_def.get("program"), evaluator))
         argv_def = run_def.get("argv", [])
@@ -316,27 +333,50 @@ class PipelineEngine:
 
         log(f"[run] {step_id}: {program} {argv}")
         start = time.perf_counter()
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [program, *argv],
             shell=shell,
             cwd=workdir,
             env=env,
-            timeout=(timeout_ms / 1000.0) if timeout_ms else None,
             text=True,
             stdout=stdout_target,
             stderr=stderr_target,
-            check=False,
         )
+
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        reader_threads: list[threading.Thread] = []
+
+        if proc.stdout is not None:
+            t = threading.Thread(target=self._stream_output, args=("stdout", proc.stdout, stdout_lines, log), daemon=True)
+            reader_threads.append(t)
+            t.start()
+        if proc.stderr is not None:
+            t = threading.Thread(target=self._stream_output, args=("stderr", proc.stderr, stderr_lines, log), daemon=True)
+            reader_threads.append(t)
+            t.start()
+
+        timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
+        try:
+            exit_code = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+        finally:
+            for t in reader_threads:
+                t.join()
+
         duration_ms = int((time.perf_counter() - start) * 1000)
 
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
+        stdout = "\n".join(stdout_lines)
+        stderr = "\n".join(stderr_lines)
         if isinstance(stdout_mode, str) and stdout_mode.startswith("file:"):
             Path(str(stdout_mode[5:])).write_text(stdout, encoding="utf-8")
         if isinstance(stderr_mode, str) and stderr_mode.startswith("file:"):
             Path(str(stderr_mode[5:])).write_text(stderr, encoding="utf-8")
 
-        return StepResult(proc.returncode, stdout, stderr, duration_ms)
+        return StepResult(exit_code, stdout, stderr, duration_ms)
 
 
 def validate_config(config: dict[str, Any]) -> None:
