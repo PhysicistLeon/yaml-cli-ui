@@ -73,4 +73,6 @@ default_yaml = examples/yt_audio.yaml
 browse_dir = examples
 ```
 
+A ready-to-use example is included in the repo: `examples/app.ini`.
+
 Relative paths in ini are resolved relative to the ini file location.
