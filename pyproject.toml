@@ -1,0 +1,17 @@
+[project]
+name = "yaml-cli-ui"
+version = "0.1.0"
+description = "YAML-driven CLI pipeline runner with dynamic Tkinter UI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.scripts]
+yaml-cli-ui = "yaml_cli_ui.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

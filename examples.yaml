@@ -1,0 +1,57 @@
+version: 1
+app:
+  title: YAML CLI Pipeline UI
+  platform: any
+  shell: false
+
+vars:
+  out_dir:
+    type: path
+    kind: dir
+    default: "${home}"
+
+actions:
+  echo_once:
+    title: "Echo once"
+    form:
+      fields:
+        - id: message
+          type: string
+          required: true
+        - id: uppercase
+          type: bool
+          default: false
+    pipeline:
+      - id: run_echo
+        run:
+          program: python
+          argv:
+            - -c
+            - "import sys;print(sys.argv[1].upper() if sys.argv[2]=='True' else sys.argv[1])"
+            - "${form.message}"
+            - "${form.uppercase}"
+          capture: true
+
+  batch_echo:
+    title: "Batch echo"
+    form:
+      fields:
+        - id: jobs
+          type: struct_list
+          default:
+            - text: hello
+            - text: world
+    pipeline:
+      - id: each
+        foreach:
+          in: "${form.jobs}"
+          as: job
+          steps:
+            - id: per_item
+              run:
+                program: python
+                argv:
+                  - -c
+                  - "import sys; print(sys.argv[1])"
+                  - "${job.text}"
+                capture: true
