@@ -36,6 +36,7 @@ actions:
       - id: download
         run:
           program: yt-dlp
+          workdir: "${home}\\Downloads\\yt"
           argv:
             - "--extract-audio": true
             - "--audio-format": mp3
