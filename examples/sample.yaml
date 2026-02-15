@@ -1,0 +1,63 @@
+version: 1
+app:
+  title: "YAML CLI UI"
+  platform: any
+  shell: false
+  env: {}
+
+vars:
+  output_dir:
+    type: path
+    kind: dir
+    default: "${home}/tmp/yaml-cli-ui"
+
+actions:
+  echo_job:
+    title: "Echo job"
+    form:
+      fields:
+        - id: name
+          type: string
+          required: true
+        - id: tags
+          type: multichoice
+          default: ["one", "two"]
+        - id: enabled
+          type: tri_bool
+          default: auto
+        - id: jobs
+          type: struct_list
+          default:
+            - task: a
+            - task: b
+    pipeline:
+      - id: print_main
+        run:
+          program: python
+          argv:
+            - "-c"
+            - "print('name=${form.name}')"
+          capture: true
+      - id: print_tags
+        run:
+          program: python
+          argv:
+            - "-c"
+            - "print('tags')"
+            - opt: "--tag"
+              from: "${form.tags}"
+              mode: join
+              joiner: ","
+          capture: true
+      - id: each_job
+        foreach:
+          in: "${form.jobs}"
+          as: job
+          steps:
+            - id: print_job
+              run:
+                program: python
+                argv:
+                  - "-c"
+                  - "print('job=${job.task} idx=${loop.index}')"
+                capture: true
