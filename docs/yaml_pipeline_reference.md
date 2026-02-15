@@ -1,26 +1,14 @@
 # YAML Pipeline Reference (v1, as-implemented)
 
-> Статус: **"как есть сейчас"**, описывает **фактическое поведение движка** в `yaml_cli_ui/engine.py`, а не идеальную/планируемую спецификацию.
->
-> Аудитория: **power users**, которые пишут YAML-пайплайны для CLI-команд.
+CLI YAML Pipeline Engine is a **Python application** that:
 
----
+* Loads a YAML file describing a CLI-driven workflow.
+* Shows top-level actions as a set of quick-launch buttons.
+* Opens a modal parameter dialog for the selected action and collects user inputs.
+* Executes a **pipeline of CLI steps**.
+* Safely constructs subprocess calls using an **argv list (NOT shell strings)**.
+* Supports batch operations, conditional steps, and reusable variables.
 
-## 1) Границы этого документа
-
-Этот guide покрывает только YAML DSL для исполнения pipeline:
-
-- top-level структура;
-- шаблонизатор `${...}` и expression language;
-- `actions`/`pipeline`/`run`/`foreach`;
-- сериализацию `argv`;
-- Windows-ориентированные практики (PowerShell, `\\` в путях, `explorer.exe`).
-
-Не покрываются UI-аспекты, формы как UI-механика, расширенная валидация ввода, security-политики и кроссплатформенные стратегии.
-
----
-
-## 2) Что задаётся кодом, а не только формальной спецификацией
 
 В текущей реализации многие ключевые правила жёстко определяются кодом:
 
@@ -32,8 +20,6 @@
 6. Шаблоны рендерятся только в строках; non-string значения возвращаются как есть.
 7. Expression evaluator ограничен allowlist-ом AST-узлов и разрешает вызовы только `len`, `empty`, `exists`.
 8. Алиас `program: python` может быть переопределён через `runtime.python.executable`.
-
----
 
 ## 3) Минимальная структура YAML
 
