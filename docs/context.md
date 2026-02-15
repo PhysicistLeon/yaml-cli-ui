@@ -218,6 +218,10 @@ multichoice
 int
 float
 
+Numeric fields MAY render as sliders when `min` and `max` are present. YAML can provide optional UI hints via `widget: "slider" | "input" | "spinbox"`; unknown keys remain engine-safe (ignored by executor) while UI may use them. If `widget` is omitted, UI chooses the control automatically.
+
+For `float` slider UIs, use integer-backed scaling to avoid precision artifacts: choose `scale = 10^decimals` (for example `step: 0.05` → `scale=100`), keep slider state as integer, and expose value as `int_value/scale`.
+
 secret
 
 * source: inline|env
