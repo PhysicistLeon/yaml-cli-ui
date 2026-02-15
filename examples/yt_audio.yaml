@@ -1,5 +1,10 @@
 version: 1
 
+# UI note:
+# - Top-level actions are rendered as buttons in the main window.
+# - Parameters are requested in a modal dialog per action run.
+# - Button colors: idle=neutral, running=yellow, success=green, failed=red.
+
 app:
   title: CLI YAML Pipeline Engine
   platform: windows
