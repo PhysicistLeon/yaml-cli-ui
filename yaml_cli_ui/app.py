@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -20,7 +21,14 @@ class App(tk.Tk):
         self.config_path = Path(config_path)
         self.config: dict[str, Any] = {}
         self.engine: PipelineEngine | None = None
-        self.is_running = False
+        self.run_seq = 0
+
+        self.run_records: dict[int, dict[str, Any]] = {}
+        self.action_histories: dict[str, list[int]] = {}
+        self.aggregate_history: list[int] = []
+        self.action_history_vars: dict[str, tk.StringVar] = {}
+        self.action_history_combos: dict[str, ttk.Combobox] = {}
+        self.action_output_texts: dict[str, tk.Text] = {}
 
         self.action_var = tk.StringVar()
         self.fields: dict[str, tuple[dict[str, Any], Any]] = {}
@@ -47,8 +55,13 @@ class App(tk.Tk):
         self.form_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         ttk.Label(self, text="Output:").pack(anchor="w", padx=10)
-        self.output = tk.Text(self, height=14)
-        self.output.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.output_notebook = ttk.Notebook(self)
+        self.output_notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        aggregate_frame = ttk.Frame(self.output_notebook)
+        self.output_notebook.add(aggregate_frame, text="All runs")
+        self.aggregate_output = tk.Text(aggregate_frame, height=14)
+        self.aggregate_output.pack(fill="both", expand=True)
 
         self.load_config()
 
@@ -59,13 +72,98 @@ class App(tk.Tk):
             self.path_entry.insert(0, selected)
             self.load_config()
 
-    def _append_log(self, msg: str) -> None:
-        self.output.insert("end", msg + "\n")
-        self.output.see("end")
+    def _new_run(self, action_id: str) -> dict[str, Any]:
+        self.run_seq += 1
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        run = {
+            "id": self.run_seq,
+            "action": action_id,
+            "status": "running",
+            "started_at": timestamp,
+            "lines": [],
+            "result": None,
+            "error": None,
+        }
+        self.run_records[self.run_seq] = run
+        self.action_histories.setdefault(action_id, []).append(self.run_seq)
+        self.aggregate_history.append(self.run_seq)
+        self._refresh_action_history(action_id)
+        self._select_action_run(action_id, self.run_seq)
+        return run
+
+    def _append_run_log(self, run_id: int, msg: str) -> None:
+        run = self.run_records[run_id]
+        run["lines"].append(msg)
+        aggregate_line = f"[{run['action']}#{run_id}] {msg}"
+        self.aggregate_output.insert("end", aggregate_line + "\n")
+        self.aggregate_output.see("end")
+
+        action_id = run["action"]
+        selected = self.action_history_vars[action_id].get()
+        if selected == self._run_label(run_id):
+            text = self.action_output_texts[action_id]
+            text.insert("end", msg + "\n")
+            text.see("end")
         self.update_idletasks()
 
-    def log(self, msg: str) -> None:
-        self.after(0, self._append_log, msg)
+    def _run_label(self, run_id: int) -> str:
+        run = self.run_records[run_id]
+        return f"#{run_id} [{run['started_at']}] {run['status']}"
+
+    def _render_action_run(self, action_id: str, run_id: int) -> None:
+        run = self.run_records[run_id]
+        text = self.action_output_texts[action_id]
+        text.delete("1.0", "end")
+        for line in run["lines"]:
+            text.insert("end", line + "\n")
+        text.see("end")
+
+    def _select_action_run(self, action_id: str, run_id: int) -> None:
+        var = self.action_history_vars[action_id]
+        var.set(self._run_label(run_id))
+        self._render_action_run(action_id, run_id)
+
+    def _on_history_selected(self, action_id: str) -> None:
+        selected = self.action_history_vars[action_id].get()
+        for run_id in self.action_histories.get(action_id, []):
+            if selected == self._run_label(run_id):
+                self._render_action_run(action_id, run_id)
+                return
+
+    def _refresh_action_history(self, action_id: str) -> None:
+        combo = self.action_history_combos[action_id]
+        values = [self._run_label(run_id) for run_id in self.action_histories.get(action_id, [])]
+        combo["values"] = values
+
+    def _create_action_tab(self, action_id: str) -> None:
+        tab = ttk.Frame(self.output_notebook)
+        self.output_notebook.add(tab, text=action_id)
+
+        row = ttk.Frame(tab)
+        row.pack(fill="x", padx=4, pady=4)
+        ttk.Label(row, text="History:").pack(side="left")
+
+        var = tk.StringVar()
+        combo = ttk.Combobox(row, state="readonly", textvariable=var)
+        combo.pack(side="left", fill="x", expand=True, padx=6)
+        combo.bind("<<ComboboxSelected>>", lambda _e, aid=action_id: self._on_history_selected(aid))
+
+        output = tk.Text(tab, height=12)
+        output.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+
+        self.action_history_vars[action_id] = var
+        self.action_history_combos[action_id] = combo
+        self.action_output_texts[action_id] = output
+
+    def _rebuild_action_tabs(self) -> None:
+        for tab_id in self.output_notebook.tabs()[1:]:
+            self.output_notebook.forget(tab_id)
+        self.action_history_vars.clear()
+        self.action_history_combos.clear()
+        self.action_output_texts.clear()
+
+        for action_id in self.config.get("actions", {}).keys():
+            self._create_action_tab(action_id)
 
     def load_config(self) -> None:
         try:
@@ -77,11 +175,17 @@ class App(tk.Tk):
             self.title(title)
             actions = self.config.get("actions", {})
             self.action_combo["values"] = list(actions.keys())
+            self.run_records.clear()
+            self.action_histories = {aid: [] for aid in actions.keys()}
+            self.aggregate_history.clear()
+            self.run_seq = 0
+            self.aggregate_output.delete("1.0", "end")
+            self._rebuild_action_tabs()
             if actions:
                 first = list(actions.keys())[0]
                 self.action_var.set(first)
             self.build_form()
-            self.log(f"Loaded: {self.config_path}")
+            self.aggregate_output.insert("end", f"Loaded: {self.config_path}\n")
         except Exception as exc:
             messagebox.showerror("Config error", str(exc))
 
@@ -196,23 +300,28 @@ class App(tk.Tk):
             raise EngineError("\n".join(errors))
         return data
 
-    def _set_running(self, running: bool) -> None:
-        self.is_running = running
-        self.run_button.config(state="disabled" if running else "normal")
-
-    def _run_action_worker(self, action_id: str, form: dict[str, Any]) -> None:
+    def _run_action_worker(self, run_id: int, action_id: str, form: dict[str, Any]) -> None:
         assert self.engine is not None
+
+        def logger(msg: str) -> None:
+            self.after(0, self._append_run_log, run_id, msg)
+
         try:
-            results = self.engine.run_action(action_id, form, self.log)
-            self.log("Done")
-            self.log(json.dumps(results, ensure_ascii=False, indent=2))
+            results = self.engine.run_action(action_id, form, logger)
+            self.run_records[run_id]["status"] = "done"
+            logger("Done")
+            logger(json.dumps(results, ensure_ascii=False, indent=2))
         except Exception as exc:
+            self.run_records[run_id]["status"] = "failed"
+            self.run_records[run_id]["error"] = str(exc)
+            logger(f"[error] {exc}")
             self.after(0, messagebox.showerror, "Execution error", str(exc))
         finally:
-            self.after(0, self._set_running, False)
+            self.after(0, self._refresh_action_history, action_id)
+            self.after(0, self._on_history_selected, action_id)
 
     def run_action(self) -> None:
-        if not self.engine or self.is_running:
+        if not self.engine:
             return
         try:
             form = self.collect_form()
@@ -220,9 +329,10 @@ class App(tk.Tk):
             messagebox.showerror("Execution error", str(exc))
             return
 
-        self.output.delete("1.0", "end")
-        self._set_running(True)
-        worker = threading.Thread(target=self._run_action_worker, args=(self.action_var.get(), form), daemon=True)
+        action_id = self.action_var.get()
+        run = self._new_run(action_id)
+        self._append_run_log(run["id"], "Started")
+        worker = threading.Thread(target=self._run_action_worker, args=(run["id"], action_id, form), daemon=True)
         worker.start()
 
 
