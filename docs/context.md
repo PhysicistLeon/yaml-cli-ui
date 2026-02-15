@@ -74,9 +74,15 @@ The engine MUST:
 ```yaml
 version: 1
 app: {...}
+runtime: {...}
 vars: {...}
 actions: {...}
 ```
+
+Implementation constraints (v1):
+
+* only `version: 1` is supported
+* `actions` is required and must be a non-empty map
 
 ---
 
@@ -139,7 +145,10 @@ ActionDef:
 
 * title: string (required)
 * form: optional
-* pipeline: required list of steps
+* pipeline: optional list of steps
+* run: optional run step shortcut
+
+Action must define at least one of: `pipeline` or `run`.
 
 Shortcut:
 
@@ -148,6 +157,19 @@ run: {...}
 ```
 
 treated as one-step pipeline.
+
+---
+
+# 3.4.1 runtime section
+
+Optional.
+
+Supported fields:
+
+* `python.executable`: string path to Python interpreter
+
+When a run step has `program: "python"`, engine may override it with
+`runtime.python.executable`.
 
 ---
 
@@ -253,13 +275,14 @@ Must support:
 * boolean and/or/not
 * parentheses
 
-Recommended helpers:
+Supported helpers (allowlist):
 
 * len(x)
 * empty(x)
 * exists(path)
 
 Must NOT allow arbitrary code execution.
+Calls to any other functions are not allowed.
 
 ---
 
@@ -385,7 +408,7 @@ value = evaluated result
 Fields:
 
 * opt (required)
-* from (required)
+* from
 * when optional
 * omit_if_empty default true
 * mode:
@@ -459,6 +482,8 @@ step.<id>.stderr
 step.<id>.duration_ms
 ```
 
+If step has no explicit `id`, engine generates `step_<n>`.
+
 ---
 
 # 3.11 Error handling
@@ -476,6 +501,16 @@ continue_on_error: true
 pipeline continues.
 
 Invalid expression MUST be fatal.
+
+---
+
+# 3.12 Implementation caveats (as-implemented)
+
+* `vars` resolution is single-pass (no recursive stabilization).
+* `vars` resolution depends on map iteration order.
+* Template rendering is applied to string values only; non-string values are returned as-is.
+* `foreach.in` must resolve to list (other iterables are rejected).
+* `program: python` override is applied only for exact `"python"` match.
 
 ---
 
