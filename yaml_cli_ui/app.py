@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import configparser
 from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,38 @@ IDLE_COLOR = "#d9d9d9"
 RUNNING_COLOR = "#f1c40f"
 SUCCESS_COLOR = "#2ecc71"
 FAILED_COLOR = "#e74c3c"
+DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
+
+
+def _resolve_ini_path(value: str, ini_path: Path) -> Path:
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = (ini_path.parent / candidate).resolve()
+    return candidate
+
+
+def load_launch_settings(ini_path: str | None) -> dict[str, Path | None]:
+    settings: dict[str, Path | None] = {"default_yaml": None, "browse_dir": None}
+    if not ini_path:
+        return settings
+
+    config = configparser.ConfigParser()
+    parsed = config.read(ini_path, encoding="utf-8")
+    if not parsed:
+        raise FileNotFoundError(f"Settings file was not found: {ini_path}")
+
+    resolved_ini_path = Path(parsed[0]).resolve()
+    ui_section = config["ui"] if config.has_section("ui") else {}
+
+    default_yaml = str(ui_section.get("default_yaml", "")).strip()
+    if default_yaml:
+        settings["default_yaml"] = _resolve_ini_path(default_yaml, resolved_ini_path)
+
+    browse_dir = str(ui_section.get("browse_dir", "")).strip()
+    if browse_dir:
+        settings["browse_dir"] = _resolve_ini_path(browse_dir, resolved_ini_path)
+
+    return settings
 
 
 def _decimal_places(value: Any) -> int:
@@ -36,11 +69,12 @@ def slider_scale_for_float_field(field: dict[str, Any]) -> int:
 
 
 class App(tk.Tk):
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, browse_dir: str | Path | None = None):
         super().__init__()
         self.title("YAML CLI UI")
         self.geometry("980x700")
         self.config_path = Path(config_path)
+        self.browse_dir = Path(browse_dir) if browse_dir else None
         self.config: dict[str, Any] = {}
         self.engine: PipelineEngine | None = None
         self.run_seq = 0
@@ -80,8 +114,13 @@ class App(tk.Tk):
         self.load_config()
 
     def _browse(self) -> None:
-        selected = filedialog.askopenfilename(filetypes=[("YAML", "*.yaml *.yml")])
+        browse_kwargs: dict[str, Any] = {"filetypes": [("YAML", "*.yaml *.yml")]}
+        if self.browse_dir:
+            browse_kwargs["initialdir"] = str(self.browse_dir)
+
+        selected = filedialog.askopenfilename(**browse_kwargs)
         if selected:
+            self.browse_dir = Path(selected).parent
             self.path_entry.delete(0, "end")
             self.path_entry.insert(0, selected)
             self.load_config()
@@ -576,10 +615,16 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="YAML-driven CLI UI")
-    parser.add_argument("config", nargs="?", default="examples/yt_audio.yaml")
+    parser.add_argument("config", nargs="?", default=None)
+    parser.add_argument("--settings", help="Path to INI file with [ui] default_yaml and browse_dir.")
     args = parser.parse_args()
 
-    app = App(args.config)
+    settings = load_launch_settings(args.settings)
+    default_config = settings["default_yaml"] or Path(DEFAULT_CONFIG_PATH)
+    config_path = Path(args.config) if args.config else default_config
+    browse_dir = settings["browse_dir"]
+
+    app = App(str(config_path), browse_dir=browse_dir)
     app.mainloop()
 
 

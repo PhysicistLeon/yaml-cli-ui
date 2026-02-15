@@ -6,6 +6,8 @@ Python app that loads workflow YAML, renders top-level actions as launch buttons
 
 ```bash
 python main.py examples/yt_audio.yaml
+# or with startup settings from ini
+python main.py --settings app.ini
 ```
 
 ## Features
@@ -54,3 +56,21 @@ When `program: python` is used in a step, the configured `runtime.python.executa
 5. While action is running, its button is yellow.
 6. After completion, button turns green on success or red on failure.
 7. Inspect logs in `All runs` (aggregate) or the action-specific tab/history.
+
+
+## INI startup settings
+
+You can provide a `--settings` ini file to define:
+
+- which YAML should be loaded by default on startup;
+- which folder should open first when pressing **Browse**.
+
+Example `app.ini`:
+
+```ini
+[ui]
+default_yaml = examples/yt_audio.yaml
+browse_dir = examples
+```
+
+Relative paths in ini are resolved relative to the ini file location.
