@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -16,6 +17,10 @@ TEMPLATE_RE = re.compile(r"\$\{([^{}]+)\}")
 
 
 class EngineError(Exception):
+    pass
+
+
+class ActionCancelledError(EngineError):
     pass
 
 
@@ -120,6 +125,38 @@ class StepResult:
 class PipelineEngine:
     def __init__(self, config: dict[str, Any]):
         self.config = config
+        self._lock = threading.Lock()
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._active_runs: dict[str, int] = {}
+        self._running_processes: dict[str, list[subprocess.Popen[str]]] = {}
+
+    def stop_action(self, action_id: str) -> None:
+        with self._lock:
+            event = self._cancel_events.get(action_id)
+            processes = list(self._running_processes.get(action_id, []))
+        if event is not None:
+            event.set()
+        for proc in processes:
+            if proc.poll() is None:
+                self._terminate_process(proc)
+
+    def _terminate_process(self, proc: subprocess.Popen[str]) -> None:
+        if proc.poll() is not None:
+            return
+        if os.name != "nt":
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+        else:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if proc.poll() is None:
+                proc.terminate()
 
     def _base_context(self, form_data: dict[str, Any], step_results: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any]:
         resolved_vars = {}
@@ -256,12 +293,41 @@ class PipelineEngine:
         if not isinstance(pipeline, list):
             raise EngineError("action.pipeline must be a list")
 
-        step_results: dict[str, Any] = {}
-        self._run_steps(pipeline, form_data, step_results, log, {})
-        return step_results
+        with self._lock:
+            event = self._cancel_events.get(action_id)
+            if event is None:
+                event = threading.Event()
+                self._cancel_events[action_id] = event
+            event.clear()
+            self._active_runs[action_id] = self._active_runs.get(action_id, 0) + 1
 
-    def _run_steps(self, steps: list[dict[str, Any]], form_data: dict[str, Any], step_results: dict[str, Any], log: callable[[str], None], scope: dict[str, Any]) -> None:
+        try:
+            step_results: dict[str, Any] = {}
+            self._run_steps(pipeline, form_data, step_results, log, {}, action_id, event)
+            return step_results
+        finally:
+            with self._lock:
+                remaining = self._active_runs.get(action_id, 1) - 1
+                if remaining <= 0:
+                    self._active_runs.pop(action_id, None)
+                    self._cancel_events.pop(action_id, None)
+                    self._running_processes.pop(action_id, None)
+                else:
+                    self._active_runs[action_id] = remaining
+
+    def _run_steps(
+        self,
+        steps: list[dict[str, Any]],
+        form_data: dict[str, Any],
+        step_results: dict[str, Any],
+        log: callable[[str], None],
+        scope: dict[str, Any],
+        action_id: str,
+        cancel_event: threading.Event,
+    ) -> None:
         for step in steps:
+            if cancel_event.is_set():
+                raise ActionCancelledError("Action was stopped by user")
             step_id = step.get("id", f"step_{len(step_results)+1}")
             ctx = self._base_context(form_data, step_results, scope)
             evaluator = SafeEvaluator(ctx)
@@ -272,7 +338,7 @@ class PipelineEngine:
 
             try:
                 if "run" in step:
-                    result = self._run_command(step_id, step["run"], evaluator, log)
+                    result = self._run_command(step_id, step["run"], evaluator, log, action_id, cancel_event)
                     step_results[step_id] = result.__dict__
                     if result.exit_code != 0 and not continue_on_error:
                         raise EngineError(f"Step {step_id} failed with exit code {result.exit_code}")
@@ -280,7 +346,7 @@ class PipelineEngine:
                     nested = step["pipeline"]
                     if not isinstance(nested, list):
                         raise EngineError("pipeline step requires list")
-                    self._run_steps(nested, form_data, step_results, log, scope)
+                    self._run_steps(nested, form_data, step_results, log, scope, action_id, cancel_event)
                 elif "foreach" in step:
                     foreach = step["foreach"]
                     items = render_template(foreach.get("in"), evaluator)
@@ -292,7 +358,7 @@ class PipelineEngine:
                         local_scope = dict(scope)
                         local_scope[var_name] = to_dotdict(value)
                         local_scope["loop"] = to_dotdict({"index": index})
-                        self._run_steps(nested_steps, form_data, step_results, log, local_scope)
+                        self._run_steps(nested_steps, form_data, step_results, log, local_scope, action_id, cancel_event)
                 else:
                     raise EngineError(f"Unknown step type in {step_id}")
             except Exception as exc:
@@ -318,7 +384,15 @@ class PipelineEngine:
             collector.append(buffer)
             log(f"[{name}] {buffer}")
 
-    def _run_command(self, step_id: str, run_def: dict[str, Any], evaluator: SafeEvaluator, log: callable[[str], None]) -> StepResult:
+    def _run_command(
+        self,
+        step_id: str,
+        run_def: dict[str, Any],
+        evaluator: SafeEvaluator,
+        log: callable[[str], None],
+        action_id: str,
+        cancel_event: threading.Event,
+    ) -> StepResult:
         raw_program = str(render_template(run_def.get("program"), evaluator))
         program = self._resolve_program(raw_program, evaluator)
         argv_def = run_def.get("argv", [])
@@ -342,6 +416,12 @@ class PipelineEngine:
 
         log(f"[run] {step_id}: {program} {argv}")
         start = time.perf_counter()
+        popen_kwargs: dict[str, Any] = {}
+        if os.name != "nt":
+            popen_kwargs["start_new_session"] = True
+        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
         proc = subprocess.Popen(
             [program, *argv],
             shell=shell,
@@ -350,7 +430,10 @@ class PipelineEngine:
             text=True,
             stdout=stdout_target,
             stderr=stderr_target,
+            **popen_kwargs,
         )
+        with self._lock:
+            self._running_processes.setdefault(action_id, []).append(proc)
 
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -366,15 +449,43 @@ class PipelineEngine:
             t.start()
 
         timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
+        deadline = (start + timeout_s) if timeout_s is not None else None
         try:
-            exit_code = proc.wait(timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise
+            while True:
+                if cancel_event.is_set():
+                    self._terminate_process(proc)
+                    try:
+                        proc.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        if os.name != "nt":
+                            try:
+                                os.killpg(proc.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        else:
+                            proc.kill()
+                        proc.wait()
+                    raise ActionCancelledError("Action was stopped by user")
+
+                if deadline is not None and time.perf_counter() >= deadline:
+                    proc.kill()
+                    proc.wait()
+                    raise subprocess.TimeoutExpired([program, *argv], timeout_s)
+
+                try:
+                    exit_code = proc.wait(timeout=0.1)
+                    if cancel_event.is_set():
+                        raise ActionCancelledError("Action was stopped by user")
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
         finally:
             for t in reader_threads:
                 t.join()
+            with self._lock:
+                processes = self._running_processes.get(action_id, [])
+                if proc in processes:
+                    processes.remove(proc)
 
         duration_ms = int((time.perf_counter() - start) * 1000)
 

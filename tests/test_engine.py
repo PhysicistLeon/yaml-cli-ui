@@ -1,6 +1,6 @@
 import io
 
-from yaml_cli_ui.engine import PipelineEngine, SafeEvaluator, render_template, to_dotdict
+from yaml_cli_ui.engine import ActionCancelledError, PipelineEngine, SafeEvaluator, render_template, to_dotdict
 
 
 def test_template_eval():
@@ -86,3 +86,88 @@ def test_python_runtime_override_program_resolution():
 
     assert engine._resolve_program("python", ev) == "C:/venv/python.exe"
     assert engine._resolve_program("python3", ev) == "python3"
+
+
+def test_stop_action_cancels_running_process():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "slow": {
+                    "title": "Slow",
+                    "run": {
+                        "program": "python",
+                        "argv": ["-c", "import time; time.sleep(5)"],
+                    },
+                }
+            },
+        }
+    )
+
+    errors = []
+
+    def _runner() -> None:
+        try:
+            engine.run_action("slow", {}, lambda _msg: None)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    import threading
+    import time
+
+    worker = threading.Thread(target=_runner, daemon=True)
+    worker.start()
+    time.sleep(0.3)
+    engine.stop_action("slow")
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert errors
+    assert isinstance(errors[0], ActionCancelledError)
+
+
+def test_stop_action_cancels_process_group_and_returns_quickly():
+    import sys
+    import threading
+    import time
+
+    script = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(5)']); "
+        "time.sleep(5)"
+    )
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "slow": {
+                    "title": "Slow",
+                    "run": {
+                        "program": sys.executable,
+                        "argv": ["-c", script],
+                    },
+                }
+            },
+        }
+    )
+
+    errors = []
+
+    def _runner() -> None:
+        try:
+            engine.run_action("slow", {}, lambda _msg: None)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    worker = threading.Thread(target=_runner, daemon=True)
+    started = time.perf_counter()
+    worker.start()
+    time.sleep(0.3)
+    engine.stop_action("slow")
+    worker.join(timeout=2)
+    elapsed = time.perf_counter() - started
+
+    assert not worker.is_alive()
+    assert errors
+    assert isinstance(errors[0], ActionCancelledError)
+    assert elapsed < 2
