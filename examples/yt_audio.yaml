@@ -8,9 +8,19 @@ app:
 
 runtime:
   python:
-    executable: "python"
+    executable: "C:\\code\\Python\\.venvs\\stable3_12_4\\Scripts\\python.exe"
 
 actions:
+
+  run_script:
+    title: "Run Python script"
+    pipeline:
+      - id: run
+        run:
+          program: python
+          argv:
+            - "tests\\timer.py"
+
   yt_audio:
     title: Download audio
     form:
