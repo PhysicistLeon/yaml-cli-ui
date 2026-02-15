@@ -206,7 +206,7 @@ class App(tk.Tk):
                 text=title,
                 bg=IDLE_COLOR,
                 activebackground=IDLE_COLOR,
-                command=lambda aid=action_id: self.open_action_dialog(aid),
+                command=lambda aid=action_id: self._on_action_button_click(aid),
             )
             btn.grid(row=index // 4, column=index % 4, sticky="ew", padx=4, pady=4)
             self.action_buttons[action_id] = btn
@@ -479,7 +479,8 @@ class App(tk.Tk):
             run["status"] = "failed"
             run["error"] = error
             self._append_run_log(run_id, f"[error] {error}")
-            messagebox.showerror("Execution error", error or "Unknown error")
+            if error != "Action was stopped by user":
+                messagebox.showerror("Execution error", error or "Unknown error")
 
         self.action_running_counts[action_id] = max(0, self.action_running_counts.get(action_id, 1) - 1)
         if self.action_running_counts[action_id] > 0:
@@ -507,6 +508,19 @@ class App(tk.Tk):
                 continue
             return True
         return False
+
+
+    def _on_action_button_click(self, action_id: str) -> None:
+        if self.action_running_counts.get(action_id, 0) > 0:
+            should_stop = messagebox.askyesno(
+                "Stop action",
+                "Action is currently running. Stop it?",
+                parent=self,
+            )
+            if should_stop and self.engine is not None:
+                self.engine.stop_action(action_id)
+            return
+        self.open_action_dialog(action_id)
 
     def open_action_dialog(self, action_id: str) -> None:
         if not self.engine:
