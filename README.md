@@ -1,6 +1,6 @@
 # YAML CLI UI
 
-Python app that loads workflow YAML, builds a dynamic form, serializes argv deterministically, and executes CLI pipelines with safe `subprocess.run(..., shell=False)` defaults.
+Python app that loads workflow YAML, renders top-level actions as launch buttons, opens per-action parameter dialogs, serializes argv deterministically, and executes CLI pipelines with safe `subprocess.run(..., shell=False)` defaults.
 
 ## Run
 
@@ -10,7 +10,11 @@ python main.py examples/yt_audio.yaml
 
 ## Features
 
-- Dynamic action/forms from YAML.
+- Top-level actions rendered as quick-launch buttons (no action dropdown).
+- Action parameters are entered in a modal dialog per run.
+- Parallel action runs with status colors: idle=neutral, running=yellow, success=green, failed=red.
+- Output notebook with aggregate `All runs` stream plus per-action tabs.
+- Per-action run history selector to inspect past outputs.
 - Supported steps: `run`, nested `pipeline`, `foreach`.
 - Safe expression evaluator for `${...}` templates.
 - Deterministic argv serialization (string/short-map/extended-option forms).
@@ -39,3 +43,13 @@ actions:
 ```
 
 When `program: python` is used in a step, the configured `runtime.python.executable` is used instead.
+
+
+## UI flow
+
+1. Click any action button on the main screen.
+2. Fill parameters in the modal dialog and press **Run**.
+3. If validation fails, run does not start and button status color is unchanged.
+4. While action is running, its button is yellow.
+5. After completion, button turns green on success or red on failure.
+6. Inspect logs in `All runs` (aggregate) or the action-specific tab/history.
