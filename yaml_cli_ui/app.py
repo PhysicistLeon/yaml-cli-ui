@@ -308,20 +308,22 @@ class App(tk.Tk):
                     _slider: tk.Scale = slider,
                     _value_var: tk.StringVar = value_var,
                     _value_label: ttk.Label | None = value_label,
+                    _normalize=_normalize_raw,
+                    _to_text=_scaled_to_text,
                 ) -> None:
                     if _state["syncing"]:
                         return
                     _state["syncing"] = True
-                    normalized = _normalize_raw(raw_value)
+                    normalized = _normalize(raw_value)
                     _slider.set(normalized)
-                    text_value = _scaled_to_text(normalized)
+                    text_value = _to_text(normalized)
                     _value_var.set(text_value)
                     if _value_label is not None:
                         _value_label.configure(text=text_value)
                     _state["syncing"] = False
 
                 def _on_slider_change(raw_text: str, _sync=_sync_from_raw) -> None:
-                    _sync_from_raw(int(float(raw_text)))
+                    _sync(int(float(raw_text)))
 
                 def _on_entry_commit(
                     _event: tk.Event[Any] | None = None,
