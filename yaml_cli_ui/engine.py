@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -137,7 +138,18 @@ class PipelineEngine:
             event.set()
         for proc in processes:
             if proc.poll() is None:
-                proc.terminate()
+                self._terminate_process(proc)
+
+    def _terminate_process(self, proc: subprocess.Popen[str]) -> None:
+        if proc.poll() is not None:
+            return
+        if os.name != "nt":
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+        else:
+            proc.terminate()
 
     def _base_context(self, form_data: dict[str, Any], step_results: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any]:
         resolved_vars = {}
@@ -397,6 +409,10 @@ class PipelineEngine:
 
         log(f"[run] {step_id}: {program} {argv}")
         start = time.perf_counter()
+        popen_kwargs: dict[str, Any] = {}
+        if os.name != "nt":
+            popen_kwargs["start_new_session"] = True
+
         proc = subprocess.Popen(
             [program, *argv],
             shell=shell,
@@ -405,6 +421,7 @@ class PipelineEngine:
             text=True,
             stdout=stdout_target,
             stderr=stderr_target,
+            **popen_kwargs,
         )
         with self._lock:
             self._running_processes.setdefault(action_id, []).append(proc)
@@ -427,11 +444,17 @@ class PipelineEngine:
         try:
             while True:
                 if cancel_event.is_set():
-                    proc.terminate()
+                    self._terminate_process(proc)
                     try:
                         proc.wait(timeout=1)
                     except subprocess.TimeoutExpired:
-                        proc.kill()
+                        if os.name != "nt":
+                            try:
+                                os.killpg(proc.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        else:
+                            proc.kill()
                         proc.wait()
                     raise ActionCancelledError("Action was stopped by user")
 

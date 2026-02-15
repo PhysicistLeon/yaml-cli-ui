@@ -124,3 +124,50 @@ def test_stop_action_cancels_running_process():
     assert not worker.is_alive()
     assert errors
     assert isinstance(errors[0], ActionCancelledError)
+
+
+def test_stop_action_cancels_process_group_and_returns_quickly():
+    import sys
+    import threading
+    import time
+
+    script = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(5)']); "
+        "time.sleep(5)"
+    )
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "slow": {
+                    "title": "Slow",
+                    "run": {
+                        "program": sys.executable,
+                        "argv": ["-c", script],
+                    },
+                }
+            },
+        }
+    )
+
+    errors = []
+
+    def _runner() -> None:
+        try:
+            engine.run_action("slow", {}, lambda _msg: None)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    worker = threading.Thread(target=_runner, daemon=True)
+    started = time.perf_counter()
+    worker.start()
+    time.sleep(0.3)
+    engine.stop_action("slow")
+    worker.join(timeout=2)
+    elapsed = time.perf_counter() - started
+
+    assert not worker.is_alive()
+    assert errors
+    assert isinstance(errors[0], ActionCancelledError)
+    assert elapsed < 2
