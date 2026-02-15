@@ -5,6 +5,11 @@ app:
   platform: windows
   shell: false
 
+
+runtime:
+  python:
+    executable: "python"
+
 actions:
   yt_audio:
     title: Download audio

@@ -16,3 +16,26 @@ python main.py examples/yt_audio.yaml
 - Deterministic argv serialization (string/short-map/extended-option forms).
 - Step result storage (`exit_code/stdout/stderr/duration_ms`).
 - YAML reload button in UI.
+
+
+## Runtime aliases
+
+You can define runtime-level executable overrides, for example for Python:
+
+```yaml
+runtime:
+  python:
+    executable: "C:\\code\\Python\\.venvs\\stable3_12_4\\Scripts\\python.exe"
+
+actions:
+  run_script:
+    title: "Run Python script"
+    pipeline:
+      - id: run
+        run:
+          program: python
+          argv:
+            - "scripts\\process.py"
+```
+
+When `program: python` is used in a step, the configured `runtime.python.executable` is used instead.

@@ -237,6 +237,14 @@ class PipelineEngine:
             raise EngineError(f"Unsupported argv item: {item}")
         return out
 
+    def _resolve_program(self, program: str, evaluator: SafeEvaluator) -> str:
+        runtime = self.config.get("runtime", {})
+        python_runtime = runtime.get("python", {}) if isinstance(runtime, dict) else {}
+        python_executable = python_runtime.get("executable") if isinstance(python_runtime, dict) else None
+        if program == "python" and python_executable:
+            return str(render_template(python_executable, evaluator))
+        return program
+
     def run_action(self, action_id: str, form_data: dict[str, Any], log: callable[[str], None]) -> dict[str, Any]:
         actions = self.config.get("actions", {})
         if action_id not in actions:
@@ -311,7 +319,8 @@ class PipelineEngine:
             log(f"[{name}] {buffer}")
 
     def _run_command(self, step_id: str, run_def: dict[str, Any], evaluator: SafeEvaluator, log: callable[[str], None]) -> StepResult:
-        program = str(render_template(run_def.get("program"), evaluator))
+        raw_program = str(render_template(run_def.get("program"), evaluator))
+        program = self._resolve_program(raw_program, evaluator)
         argv_def = run_def.get("argv", [])
         argv = self.serialize_argv(argv_def, evaluator)
         shell = bool(run_def.get("shell", self.config.get("app", {}).get("shell", False)))
