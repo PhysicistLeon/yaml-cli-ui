@@ -1,0 +1,25 @@
+version: 1
+app:
+  title: "YAML CLI UI Demo"
+  platform: any
+  shell: false
+
+actions:
+  echo:
+    title: "Echo text"
+    form:
+      fields:
+        - id: message
+          type: string
+          required: true
+        - id: uppercase
+          type: bool
+          default: false
+    pipeline:
+      - id: run_echo
+        run:
+          program: python
+          argv:
+            - -c
+            - "print('${form.message}'.upper() if ${form.uppercase} else '${form.message}')"
+          capture: true
