@@ -285,6 +285,11 @@ Validation properties (type-dependent):
 * `regex: string` (string/text)
 * `min`, `max`, `step` (int/float)
 
+UI hint properties (optional, engine-safe to ignore):
+
+* `widget: "slider" | "input" | "spinbox"`
+* `slider: { show_value: bool, ticks: bool }`
+
 #### 8.2.2 Supported field types (v1)
 
 **Primitive**
@@ -321,6 +326,10 @@ Validation properties (type-dependent):
 * `choice` yields a single string.
 * `multichoice` yields `list<string>`.
 * `path.multiple: true` yields `list<string>`.
+* Numeric fields MAY render as sliders when both `min` and `max` are provided.
+* `widget` is an optional UI hint: execution engine ignores it, UI MAY use it.
+* If `widget` is absent, UI chooses rendering automatically.
+* For float sliders, UIs SHOULD use internal integer scaling (`scale = 10^decimals`) and map back to `value/scale` to avoid floating-point drift.
 
 ---
 

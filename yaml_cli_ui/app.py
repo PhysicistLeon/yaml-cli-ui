@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -17,6 +18,21 @@ IDLE_COLOR = "#d9d9d9"
 RUNNING_COLOR = "#f1c40f"
 SUCCESS_COLOR = "#2ecc71"
 FAILED_COLOR = "#e74c3c"
+
+
+def _decimal_places(value: Any) -> int:
+    if not isinstance(value, (int, float)):
+        return 0
+    text = format(Decimal(str(value)).normalize(), "f")
+    if "." not in text:
+        return 0
+    return len(text.rstrip("0").split(".", 1)[1])
+
+
+def slider_scale_for_float_field(field: dict[str, Any]) -> int:
+    candidates = [field.get("step"), field.get("default"), field.get("min"), field.get("max")]
+    decimals = max((_decimal_places(v) for v in candidates), default=0)
+    return 10**decimals
 
 
 class App(tk.Tk):
@@ -224,12 +240,100 @@ class App(tk.Tk):
             fid = field["id"]
             label = field.get("label", fid)
             ftype = field.get("type", "string")
+            widget_hint = field.get("widget")
+            slider_opts = field.get("slider", {}) if isinstance(field.get("slider"), dict) else {}
             ttk.Label(parent, text=label).grid(row=i, column=0, sticky="w", padx=5, pady=4)
 
             widget: Any
-            if ftype in {"string", "path", "int", "float", "secret"}:
+            if ftype in {"int", "float"} and widget_hint == "slider" and "min" in field and "max" in field:
+                scale = slider_scale_for_float_field(field) if ftype == "float" else 1
+                min_value = int(round(float(field["min"]) * scale))
+                max_value = int(round(float(field["max"]) * scale))
+                step_value = max(1, int(round(float(field.get("step", 1 if ftype == "int" else 0.1)) * scale)))
+                default_raw = field.get("default", field.get("min", 0))
+                display_decimals = _decimal_places(field.get("step", 0)) if ftype == "float" else 0
+
+                wrapper = ttk.Frame(parent)
+                wrapper.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
+                wrapper.columnconfigure(0, weight=1)
+
+                slider = tk.Scale(
+                    wrapper,
+                    from_=min_value,
+                    to=max_value,
+                    orient="horizontal",
+                    resolution=step_value,
+                    showvalue=False,
+                    tickinterval=step_value if slider_opts.get("ticks") else 0,
+                )
+                slider.grid(row=0, column=0, sticky="ew")
+
+                min_label = ttk.Label(wrapper, text=str(field["min"]))
+                min_label.grid(row=1, column=0, sticky="w")
+                max_label = ttk.Label(wrapper, text=str(field["max"]))
+                max_label.grid(row=1, column=0, sticky="e")
+
+                value_var = tk.StringVar()
+                value_entry = ttk.Entry(wrapper, textvariable=value_var, width=12)
+                value_entry.grid(row=0, column=1, padx=(8, 0), sticky="e")
+
+                value_label: ttk.Label | None = None
+                if slider_opts.get("show_value"):
+                    value_label = ttk.Label(wrapper)
+                    value_label.grid(row=1, column=1, padx=(8, 0), sticky="e")
+
+                state = {"syncing": False}
+
+                def _scaled_to_text(raw_value: int) -> str:
+                    shown = raw_value / scale
+                    if ftype == "int":
+                        return str(int(round(shown)))
+                    return f"{shown:.{display_decimals}f}" if display_decimals > 0 else str(shown)
+
+                def _normalize_raw(raw_value: int) -> int:
+                    bounded = max(min_value, min(max_value, raw_value))
+                    snapped = min_value + int(round((bounded - min_value) / step_value)) * step_value
+                    return max(min_value, min(max_value, snapped))
+
+                def _sync_from_raw(raw_value: int) -> None:
+                    if state["syncing"]:
+                        return
+                    state["syncing"] = True
+                    normalized = _normalize_raw(raw_value)
+                    slider.set(normalized)
+                    text_value = _scaled_to_text(normalized)
+                    value_var.set(text_value)
+                    if value_label is not None:
+                        value_label.configure(text=text_value)
+                    state["syncing"] = False
+
+                def _on_slider_change(raw_text: str) -> None:
+                    _sync_from_raw(int(float(raw_text)))
+
+                def _on_entry_commit(_event: tk.Event[Any] | None = None) -> None:
+                    if state["syncing"]:
+                        return
+                    try:
+                        entered_value = float(value_var.get().strip())
+                    except ValueError:
+                        _sync_from_raw(int(slider.get()))
+                        return
+                    _sync_from_raw(int(round(entered_value * scale)))
+
+                slider.configure(command=_on_slider_change)
+                value_entry.bind("<Return>", _on_entry_commit)
+                value_entry.bind("<FocusOut>", _on_entry_commit)
+
+                _sync_from_raw(int(round(float(default_raw) * scale)))
+
+                widget = {"kind": "slider", "control": slider, "scale": scale, "type": ftype}
+            elif ftype in {"string", "path", "int", "float", "secret"}:
                 show = "*" if ftype == "secret" and field.get("source", "inline") == "inline" else ""
-                widget = ttk.Entry(parent, show=show)
+                if ftype in {"int", "float"} and widget_hint == "spinbox" and "min" in field and "max" in field:
+                    increment = field.get("step", 1 if ftype == "int" else 0.1)
+                    widget = ttk.Spinbox(parent, from_=field["min"], to=field["max"], increment=increment)
+                else:
+                    widget = ttk.Entry(parent, show=show)
                 if "default" in field:
                     widget.insert(0, str(field["default"]))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
@@ -278,6 +382,10 @@ class App(tk.Tk):
             value: Any = None
             if ftype == "text":
                 value = widget.get("1.0", "end").rstrip("\n")
+            elif isinstance(widget, dict) and widget.get("kind") == "slider":
+                scale = widget["scale"]
+                raw_value = int(widget["control"].get())
+                value = raw_value if scale == 1 else raw_value / scale
             elif ftype == "bool":
                 value = bool(widget.var.get())
             elif ftype == "tri_bool":
