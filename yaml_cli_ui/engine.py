@@ -149,7 +149,14 @@ class PipelineEngine:
             except ProcessLookupError:
                 return
         else:
-            proc.terminate()
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if proc.poll() is None:
+                proc.terminate()
 
     def _base_context(self, form_data: dict[str, Any], step_results: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any]:
         resolved_vars = {}
@@ -412,6 +419,8 @@ class PipelineEngine:
         popen_kwargs: dict[str, Any] = {}
         if os.name != "nt":
             popen_kwargs["start_new_session"] = True
+        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
         proc = subprocess.Popen(
             [program, *argv],
