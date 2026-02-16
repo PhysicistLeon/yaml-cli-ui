@@ -11,6 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, TextIO
 
 
@@ -95,8 +96,9 @@ class SafeEvaluator:
                 if not isinstance(node.func, ast.Name) or node.func.id not in {"len", "empty", "exists"}:
                     raise EngineError("Only len/empty/exists calls are allowed")
         try:
-            return eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context)
-        except Exception as exc:
+            # Controlled eval over a pre-validated AST and empty builtins.
+            return eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context)  # pylint: disable=eval-used
+        except (NameError, AttributeError, KeyError, IndexError, TypeError, ValueError, ZeroDivisionError) as exc:
             raise EngineError(f"Expression evaluation failed: {expression}: {exc}") from exc
 
 
@@ -255,38 +257,39 @@ class PipelineEngine:
                 if omit_if_empty and empty(value):
                     continue
 
-                def add(opt_name: str, val: Any | None = None) -> None:
-                    if val is None:
-                        out.append(opt_name)
-                    elif style == "equals":
-                        out.append(f"{opt_name}={val}")
-                    else:
-                        out.extend([opt_name, str(val)])
-
                 if mode == "flag":
                     if value is True:
                         out.append(opt)
                     elif value is False and false_opt:
                         out.append(str(false_opt))
                 elif mode == "value":
-                    add(opt, value)
+                    self._append_option(out, opt, style, value)
                 elif mode == "repeat":
                     values = value if isinstance(value, list) else [value]
                     for entry in values:
                         val = template.format(**entry) if template and isinstance(entry, dict) else (template.format(entry) if template else entry)
-                        add(opt, val)
+                        self._append_option(out, opt, style, val)
                 elif mode == "join":
                     values = value if isinstance(value, list) else [value]
                     rendered = []
                     for entry in values:
                         rendered.append(template.format(**entry) if template and isinstance(entry, dict) else (template.format(entry) if template else str(entry)))
-                    add(opt, item.get("joiner", ",").join(rendered))
+                    self._append_option(out, opt, style, item.get("joiner", ",").join(rendered))
                 else:
                     raise EngineError(f"Unknown mode: {mode}")
                 continue
 
             raise EngineError(f"Unsupported argv item: {item}")
         return out
+
+    @staticmethod
+    def _append_option(out: list[str], opt_name: str, style: str, val: Any | None = None) -> None:
+        if val is None:
+            out.append(opt_name)
+        elif style == "equals":
+            out.append(f"{opt_name}={val}")
+        else:
+            out.extend([opt_name, str(val)])
 
     def _resolve_program(self, program: str, evaluator: SafeEvaluator) -> str:
         runtime = self.config.get("runtime", {})
@@ -296,7 +299,7 @@ class PipelineEngine:
             return str(render_template(python_executable, evaluator))
         return program
 
-    def run_action(self, action_id: str, form_data: dict[str, Any], log: callable[[str], None]) -> dict[str, Any]:
+    def run_action(self, action_id: str, form_data: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
         actions = self.config.get("actions", {})
         if action_id not in actions:
             raise EngineError(f"Unknown action: {action_id}")
@@ -334,7 +337,7 @@ class PipelineEngine:
         steps: list[dict[str, Any]],
         form_data: dict[str, Any],
         step_results: dict[str, Any],
-        log: callable[[str], None],
+        log: Callable[[str], None],
         scope: dict[str, Any],
         action_id: str,
         cancel_event: threading.Event,
@@ -375,13 +378,13 @@ class PipelineEngine:
                         self._run_steps(nested_steps, form_data, step_results, log, local_scope, action_id, cancel_event)
                 else:
                     raise EngineError(f"Unknown step type in {step_id}")
-            except Exception as exc:
+            except (EngineError, ActionCancelledError, OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError) as exc:
                 if continue_on_error:
                     log(f"[warn] {step_id}: {exc}")
                     continue
                 raise
 
-    def _stream_output(self, name: str, stream: TextIO, collector: list[str], log: callable[[str], None]) -> None:
+    def _stream_output(self, name: str, stream: TextIO, collector: list[str], log: Callable[[str], None]) -> None:
         buffer = ""
         while True:
             chunk = stream.read(1)
@@ -403,7 +406,7 @@ class PipelineEngine:
         step_id: str,
         run_def: dict[str, Any],
         evaluator: SafeEvaluator,
-        log: callable[[str], None],
+        log: Callable[[str], None],
         action_id: str,
         cancel_event: threading.Event,
     ) -> StepResult:
@@ -438,7 +441,7 @@ class PipelineEngine:
         elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        proc = subprocess.Popen(
+        with subprocess.Popen(
             [program, *argv],
             shell=shell,
             cwd=workdir,
@@ -447,63 +450,63 @@ class PipelineEngine:
             stdout=stdout_target,
             stderr=stderr_target,
             **popen_kwargs,
-        )
-        with self._lock:
-            self._running_processes.setdefault(action_id, []).append(proc)
-
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-        reader_threads: list[threading.Thread] = []
-
-        if proc.stdout is not None:
-            t = threading.Thread(target=self._stream_output, args=("stdout", proc.stdout, stdout_lines, log), daemon=True)
-            reader_threads.append(t)
-            t.start()
-        if proc.stderr is not None:
-            t = threading.Thread(target=self._stream_output, args=("stderr", proc.stderr, stderr_lines, log), daemon=True)
-            reader_threads.append(t)
-            t.start()
-
-        timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
-        deadline = (start + timeout_s) if timeout_s is not None else None
-        try:
-            while True:
-                if cancel_event.is_set():
-                    self._terminate_process(proc)
-                    try:
-                        proc.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        if os.name != "nt":
-                            try:
-                                os.killpg(proc.pid, signal.SIGKILL)
-                            except ProcessLookupError:
-                                pass
-                        else:
-                            proc.kill()
-                        proc.wait()
-                    raise ActionCancelledError("Action was stopped by user")
-
-                if deadline is not None and time.perf_counter() >= deadline:
-                    proc.kill()
-                    proc.wait()
-                    raise subprocess.TimeoutExpired([program, *argv], timeout_s)
-
-                try:
-                    exit_code = proc.wait(timeout=0.1)
-                    if cancel_event.is_set():
-                        raise ActionCancelledError("Action was stopped by user")
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
-        finally:
-            for t in reader_threads:
-                t.join()
+        ) as proc:
             with self._lock:
-                processes = self._running_processes.get(action_id, [])
-                if proc in processes:
-                    processes.remove(proc)
+                self._running_processes.setdefault(action_id, []).append(proc)
 
-        duration_ms = int((time.perf_counter() - start) * 1000)
+            stdout_lines: list[str] = []
+            stderr_lines: list[str] = []
+            reader_threads: list[threading.Thread] = []
+
+            if proc.stdout is not None:
+                t = threading.Thread(target=self._stream_output, args=("stdout", proc.stdout, stdout_lines, log), daemon=True)
+                reader_threads.append(t)
+                t.start()
+            if proc.stderr is not None:
+                t = threading.Thread(target=self._stream_output, args=("stderr", proc.stderr, stderr_lines, log), daemon=True)
+                reader_threads.append(t)
+                t.start()
+
+            timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
+            deadline = (start + timeout_s) if timeout_s is not None else None
+            try:
+                while True:
+                    if cancel_event.is_set():
+                        self._terminate_process(proc)
+                        try:
+                            proc.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            if os.name != "nt":
+                                try:
+                                    os.killpg(proc.pid, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
+                            else:
+                                proc.kill()
+                            proc.wait()
+                        raise ActionCancelledError("Action was stopped by user")
+
+                    if deadline is not None and time.perf_counter() >= deadline:
+                        proc.kill()
+                        proc.wait()
+                        raise subprocess.TimeoutExpired([program, *argv], timeout_s)
+
+                    try:
+                        exit_code = proc.wait(timeout=0.1)
+                        if cancel_event.is_set():
+                            raise ActionCancelledError("Action was stopped by user")
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+            finally:
+                for t in reader_threads:
+                    t.join()
+                with self._lock:
+                    processes = self._running_processes.get(action_id, [])
+                    if proc in processes:
+                        processes.remove(proc)
+
+            duration_ms = int((time.perf_counter() - start) * 1000)
 
         stdout = "\n".join(stdout_lines)
         stderr = "\n".join(stderr_lines)
@@ -516,6 +519,8 @@ class PipelineEngine:
 
 
 def validate_config(config: dict[str, Any]) -> None:
+    if not isinstance(config, dict):
+        raise EngineError("Config root must be a mapping")
     if config.get("version") != 1:
         raise EngineError("Only version=1 is supported")
     actions = config.get("actions")

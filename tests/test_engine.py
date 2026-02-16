@@ -1,4 +1,8 @@
+# pylint: disable=protected-access
 import io
+import sys
+import threading
+import time
 
 from yaml_cli_ui.engine import ActionCancelledError, PipelineEngine, SafeEvaluator, render_template, to_dotdict
 
@@ -92,8 +96,6 @@ def test_sanitize_child_env_for_embedded_tk():
     assert sanitized["SYSTEMROOT"] == r"C:\Windows"
 
 
-
-
 def test_python_runtime_override_program_resolution():
     engine = PipelineEngine(
         {
@@ -143,11 +145,8 @@ def test_stop_action_cancels_running_process():
     def _runner() -> None:
         try:
             engine.run_action("slow", {}, lambda _msg: None)
-        except Exception as exc:  # noqa: BLE001
+        except ActionCancelledError as exc:
             errors.append(exc)
-
-    import threading
-    import time
 
     worker = threading.Thread(target=_runner, daemon=True)
     worker.start()
@@ -161,10 +160,6 @@ def test_stop_action_cancels_running_process():
 
 
 def test_stop_action_cancels_process_group_and_returns_quickly():
-    import sys
-    import threading
-    import time
-
     script = (
         "import subprocess,sys,time; "
         "subprocess.Popen([sys.executable,'-c','import time; time.sleep(5)']); "
@@ -190,7 +185,7 @@ def test_stop_action_cancels_process_group_and_returns_quickly():
     def _runner() -> None:
         try:
             engine.run_action("slow", {}, lambda _msg: None)
-        except Exception as exc:  # noqa: BLE001
+        except ActionCancelledError as exc:
             errors.append(exc)
 
     worker = threading.Thread(target=_runner, daemon=True)
