@@ -464,38 +464,36 @@ class App(tk.Tk):
 
                 def _sync_from_raw(
                     raw_value: int,
-                    _state: dict[str, bool] | None = None,
+                    _state: dict[str, bool] = state,
                     _normalize=_normalize_raw,
                     _slider: tk.Scale = slider,
                     _to_text=_scaled_to_text,
                     _value_var: tk.StringVar = value_var,
                     _value_label: ttk.Label | None = value_label,
                 ) -> None:
-                    state_ref = state if _state is None else _state
-                    if state_ref["syncing"]:
+                    if _state["syncing"]:
                         return
-                    state_ref["syncing"] = True
+                    _state["syncing"] = True
                     normalized = _normalize(raw_value)
                     _slider.set(normalized)
                     text_value = _to_text(normalized)
                     _value_var.set(text_value)
                     if _value_label is not None:
                         _value_label.configure(text=text_value)
-                    state_ref["syncing"] = False
+                    _state["syncing"] = False
 
                 def _on_slider_change(raw_text: str, _sync=_sync_from_raw) -> None:
                     _sync(int(float(raw_text)))
 
                 def _on_entry_commit(
                     _event: tk.Event[Any] | None = None,
-                    _state: dict[str, bool] | None = None,
+                    _state: dict[str, bool] = state,
                     _value_var: tk.StringVar = value_var,
                     _sync=_sync_from_raw,
                     _slider: tk.Scale = slider,
                     _scale: int = scale,
                 ) -> None:
-                    state_ref = state if _state is None else _state
-                    if state_ref["syncing"]:
+                    if _state["syncing"]:
                         return
                     try:
                         entered_value = float(_value_var.get().strip())
