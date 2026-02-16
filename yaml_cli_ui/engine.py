@@ -103,9 +103,9 @@ class SafeEvaluator:
                     raise EngineError("Only len/empty/exists calls are allowed")
         try:
             # Controlled eval over a pre-validated AST and empty builtins.
-            return eval(
+            return eval(  # pylint: disable=eval-used
                 compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context
-            )  # pylint: disable=eval-used
+            )
         except (
             NameError,
             AttributeError,
