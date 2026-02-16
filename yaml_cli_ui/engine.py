@@ -11,6 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, TextIO
 
 
@@ -95,8 +96,9 @@ class SafeEvaluator:
                 if not isinstance(node.func, ast.Name) or node.func.id not in {"len", "empty", "exists"}:
                     raise EngineError("Only len/empty/exists calls are allowed")
         try:
-            return eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context)
-        except Exception as exc:
+            # Controlled eval over a pre-validated AST and empty builtins.
+            return eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context)  # pylint: disable=eval-used
+        except (NameError, AttributeError, KeyError, IndexError, TypeError, ValueError, ZeroDivisionError) as exc:
             raise EngineError(f"Expression evaluation failed: {expression}: {exc}") from exc
 
 
@@ -296,7 +298,7 @@ class PipelineEngine:
             return str(render_template(python_executable, evaluator))
         return program
 
-    def run_action(self, action_id: str, form_data: dict[str, Any], log: callable[[str], None]) -> dict[str, Any]:
+    def run_action(self, action_id: str, form_data: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
         actions = self.config.get("actions", {})
         if action_id not in actions:
             raise EngineError(f"Unknown action: {action_id}")
@@ -334,7 +336,7 @@ class PipelineEngine:
         steps: list[dict[str, Any]],
         form_data: dict[str, Any],
         step_results: dict[str, Any],
-        log: callable[[str], None],
+        log: Callable[[str], None],
         scope: dict[str, Any],
         action_id: str,
         cancel_event: threading.Event,
@@ -375,13 +377,13 @@ class PipelineEngine:
                         self._run_steps(nested_steps, form_data, step_results, log, local_scope, action_id, cancel_event)
                 else:
                     raise EngineError(f"Unknown step type in {step_id}")
-            except Exception as exc:
+            except (EngineError, ActionCancelledError, OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError) as exc:
                 if continue_on_error:
                     log(f"[warn] {step_id}: {exc}")
                     continue
                 raise
 
-    def _stream_output(self, name: str, stream: TextIO, collector: list[str], log: callable[[str], None]) -> None:
+    def _stream_output(self, name: str, stream: TextIO, collector: list[str], log: Callable[[str], None]) -> None:
         buffer = ""
         while True:
             chunk = stream.read(1)
@@ -403,7 +405,7 @@ class PipelineEngine:
         step_id: str,
         run_def: dict[str, Any],
         evaluator: SafeEvaluator,
-        log: callable[[str], None],
+        log: Callable[[str], None],
         action_id: str,
         cancel_event: threading.Event,
     ) -> StepResult:
@@ -516,6 +518,8 @@ class PipelineEngine:
 
 
 def validate_config(config: dict[str, Any]) -> None:
+    if not isinstance(config, dict):
+        raise EngineError("Config root must be a mapping")
     if config.get("version") != 1:
         raise EngineError("Only version=1 is supported")
     actions = config.get("actions")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import threading
 import configparser
@@ -390,7 +391,7 @@ class App(tk.Tk):
             self._build_action_buttons()
             self._rebuild_action_tabs()
             self.aggregate_output.insert("end", f"Loaded: {self.config_path}\n")
-        except Exception as exc:
+        except (OSError, yaml.YAMLError, EngineError, TypeError, ValueError) as exc:
             messagebox.showerror("Config error", str(exc))
 
     def _create_form_fields(self, parent: tk.Widget, form: dict[str, Any]) -> dict[str, tuple[dict[str, Any], Any]]:
@@ -460,46 +461,30 @@ class App(tk.Tk):
                     snapped = _min_value + int(round((bounded - _min_value) / _step_value)) * _step_value
                     return max(_min_value, min(_max_value, snapped))
 
-                def _sync_from_raw(
-                    raw_value: int,
-                    *,
-                    _state: dict[str, bool] = state,
-                    _slider: tk.Scale = slider,
-                    _value_var: tk.StringVar = value_var,
-                    _value_label: ttk.Label | None = value_label,
-                    _normalize=_normalize_raw,
-                    _to_text=_scaled_to_text,
-                ) -> None:
-                    if _state["syncing"]:
+                def _sync_from_raw(raw_value: int) -> None:
+                    if state["syncing"]:
                         return
-                    _state["syncing"] = True
-                    normalized = _normalize(raw_value)
-                    _slider.set(normalized)
-                    text_value = _to_text(normalized)
-                    _value_var.set(text_value)
-                    if _value_label is not None:
-                        _value_label.configure(text=text_value)
-                    _state["syncing"] = False
+                    state["syncing"] = True
+                    normalized = _normalize_raw(raw_value)
+                    slider.set(normalized)
+                    text_value = _scaled_to_text(normalized)
+                    value_var.set(text_value)
+                    if value_label is not None:
+                        value_label.configure(text=text_value)
+                    state["syncing"] = False
 
-                def _on_slider_change(raw_text: str, _sync=_sync_from_raw) -> None:
-                    _sync(int(float(raw_text)))
+                def _on_slider_change(raw_text: str) -> None:
+                    _sync_from_raw(int(float(raw_text)))
 
-                def _on_entry_commit(
-                    _event: tk.Event[Any] | None = None,
-                    _state: dict[str, bool] = state,
-                    _value_var: tk.StringVar = value_var,
-                    _scale: int = scale,
-                    _slider: tk.Scale = slider,
-                    _sync=_sync_from_raw,
-                ) -> None:
-                    if _state["syncing"]:
+                def _on_entry_commit(_event: tk.Event[Any] | None = None) -> None:
+                    if state["syncing"]:
                         return
                     try:
-                        entered_value = float(_value_var.get().strip())
+                        entered_value = float(value_var.get().strip())
                     except ValueError:
-                        _sync(int(_slider.get()))
+                        _sync_from_raw(int(slider.get()))
                         return
-                    _sync(int(round(entered_value * _scale)))
+                    _sync_from_raw(int(round(entered_value * scale)))
 
                 slider.configure(command=_on_slider_change)
                 value_entry.bind("<Return>", _on_entry_commit)
@@ -639,7 +624,7 @@ class App(tk.Tk):
             self.after(0, self._finish_run, run_id, True, results, None, False)
         except ActionCancelledError as exc:
             self.after(0, self._finish_run, run_id, False, None, str(exc), True)
-        except Exception as exc:
+        except (EngineError, OSError, ValueError, TypeError) as exc:
             self.after(0, self._finish_run, run_id, False, None, str(exc), False)
 
     def _finish_run(
@@ -733,7 +718,7 @@ class App(tk.Tk):
         def on_run() -> None:
             try:
                 data = self._collect_form(fields)
-            except Exception as exc:
+            except EngineError as exc:
                 messagebox.showerror("Execution error", str(exc), parent=dialog)
                 return
             dialog.destroy()
@@ -747,8 +732,6 @@ class App(tk.Tk):
 
 
 def main() -> None:
-    import argparse
-
     parser = argparse.ArgumentParser(description="YAML-driven CLI UI")
     parser.add_argument("config", nargs="?", default=None)
     parser.add_argument("--settings", help="Path to INI file with [ui] default_yaml and browse_dir.", default='app.ini')
