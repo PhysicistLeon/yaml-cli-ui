@@ -1,8 +1,3 @@
-import sys
-import types
-
-sys.modules.setdefault("yaml", types.SimpleNamespace())
-
 from yaml_cli_ui.app import HELP_CONTENT, load_launch_settings, slider_scale_for_float_field
 
 
@@ -18,7 +13,10 @@ def test_slider_scale_uses_max_decimal_places_from_numeric_props():
 
 def test_load_launch_settings_reads_default_yaml_and_browse_dir(tmp_path):
     settings_file = tmp_path / "ui.ini"
-    settings_file.write_text("[ui]\ndefault_yaml = configs/main.yaml\nbrowse_dir = ./yamls\n", encoding="utf-8")
+    settings_file.write_text(
+        "[ui]\ndefault_yaml = configs/main.yaml\nbrowse_dir = ./yamls\n",
+        encoding="utf-8",
+    )
 
     settings = load_launch_settings(str(settings_file))
 
