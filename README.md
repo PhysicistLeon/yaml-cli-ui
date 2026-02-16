@@ -6,8 +6,6 @@
 
 Python app that loads workflow YAML, renders top-level actions as launch buttons, opens per-action parameter dialogs, serializes argv deterministically, and executes CLI pipelines with safe `subprocess.run(..., shell=False)` defaults.
 
-> To upload coverage to Codecov from GitHub Actions in private repositories, add `CODECOV_TOKEN` to repository secrets.
-
 ## Run
 
 ```bash
