@@ -16,6 +16,7 @@ python main.py --settings app.ini
 
 - Top-level actions rendered as quick-launch buttons (no action dropdown).
 - Action parameters are entered in a modal dialog per run.
+- Last entered action parameters are remembered between app restarts (per YAML config and action, excluding `secret` fields) and prefilled on next run.
 - Parallel action runs with status colors: idle=neutral, running=yellow, success=green, failed=red.
 - Output notebook with aggregate `All runs` stream plus per-action tabs.
 - Per-action run history selector to inspect past outputs.

@@ -23,6 +23,7 @@ RUNNING_COLOR = "#f1c40f"
 SUCCESS_COLOR = "#2ecc71"
 FAILED_COLOR = "#e74c3c"
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
+STATE_FILE_PATH = Path.home() / ".yaml_cli_ui" / "state.json"
 
 
 HELP_CONTENT = """Как работает приложение
@@ -136,6 +137,21 @@ def slider_scale_for_float_field(field: dict[str, Any]) -> int:
     return 10**decimals
 
 
+def load_ui_state(state_file: Path = STATE_FILE_PATH) -> dict[str, Any]:
+    if not state_file.exists():
+        return {}
+    try:
+        raw = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_ui_state(state: dict[str, Any], state_file: Path = STATE_FILE_PATH) -> None:
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 class App(tk.Tk):
     def __init__(self, config_path: str, browse_dir: str | Path | None = None):
         super().__init__()
@@ -154,6 +170,7 @@ class App(tk.Tk):
         self.action_output_texts: dict[str, tk.Text] = {}
         self.action_buttons: dict[str, tk.Button] = {}
         self.action_running_counts: dict[str, int] = {}
+        self.ui_state = load_ui_state()
 
         top = ttk.Frame(self)
         top.pack(fill="x", padx=10, pady=8)
@@ -376,6 +393,28 @@ class App(tk.Tk):
         for col in range(4):
             self.actions_frame.columnconfigure(col, weight=1)
 
+    def _config_state_key(self) -> str:
+        return str(self.config_path.resolve())
+
+    def _get_saved_form_values(self, action_id: str) -> dict[str, Any]:
+        config_state = self.ui_state.get(self._config_state_key(), {})
+        if not isinstance(config_state, dict):
+            return {}
+        action_state = config_state.get(action_id, {})
+        return action_state if isinstance(action_state, dict) else {}
+
+    def _save_form_values(self, action_id: str, values: dict[str, Any]) -> None:
+        key = self._config_state_key()
+        config_state = self.ui_state.get(key)
+        if not isinstance(config_state, dict):
+            config_state = {}
+            self.ui_state[key] = config_state
+        config_state[action_id] = values
+        try:
+            save_ui_state(self.ui_state)
+        except OSError:
+            pass
+
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
@@ -441,13 +480,20 @@ class App(tk.Tk):
             return
         sync(int(round(entered_value * scale)))
 
-    def _create_form_fields(self, parent: tk.Widget, form: dict[str, Any]) -> dict[str, tuple[dict[str, Any], Any]]:
+    def _create_form_fields(
+        self,
+        parent: tk.Widget,
+        form: dict[str, Any],
+        initial_values: dict[str, Any] | None = None,
+    ) -> dict[str, tuple[dict[str, Any], Any]]:
         fields: dict[str, tuple[dict[str, Any], Any]] = {}
+        initial_values = initial_values or {}
         for i, field in enumerate(form.get("fields", [])):
             fid = field["id"]
             label = field.get("label", fid)
             ftype = field.get("type", "string")
             widget_hint = field.get("widget")
+            initial_value = initial_values.get(fid, field.get("default"))
             slider_opts = field.get("slider", {}) if isinstance(field.get("slider"), dict) else {}
             ttk.Label(parent, text=label).grid(row=i, column=0, sticky="w", padx=5, pady=4)
 
@@ -457,7 +503,7 @@ class App(tk.Tk):
                 min_value = int(round(float(field["min"]) * scale))
                 max_value = int(round(float(field["max"]) * scale))
                 step_value = max(1, int(round(float(field.get("step", 1 if ftype == "int" else 0.1)) * scale)))
-                default_raw = field.get("default", field.get("min", 0))
+                default_raw = initial_value if initial_value is not None else field.get("min", 0)
                 display_decimals = _decimal_places(field.get("step", 0)) if ftype == "float" else 0
 
                 wrapper = ttk.Frame(parent)
@@ -541,8 +587,8 @@ class App(tk.Tk):
                     widget = ttk.Spinbox(parent, from_=field["min"], to=field["max"], increment=increment)
                 else:
                     widget = ttk.Entry(parent, show=show)
-                if "default" in field:
-                    widget.insert(0, str(field["default"]))
+                if initial_value is not None:
+                    widget.insert(0, str(initial_value))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "path":
                 path_wrapper = ttk.Frame(parent)
@@ -550,8 +596,8 @@ class App(tk.Tk):
                 path_wrapper.columnconfigure(0, weight=1)
 
                 widget = ttk.Entry(path_wrapper)
-                if "default" in field:
-                    widget.insert(0, str(field["default"]))
+                if initial_value is not None:
+                    widget.insert(0, str(initial_value))
                 widget.grid(row=0, column=0, sticky="ew")
 
                 ttk.Button(
@@ -561,32 +607,37 @@ class App(tk.Tk):
                 ).grid(row=0, column=1, padx=(6, 0))
             elif ftype == "text":
                 widget = tk.Text(parent, height=4)
-                if "default" in field:
-                    widget.insert("1.0", str(field["default"]))
+                if initial_value is not None:
+                    widget.insert("1.0", str(initial_value))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "bool":
-                var = tk.BooleanVar(value=bool(field.get("default", False)))
+                var = tk.BooleanVar(value=bool(initial_value) if initial_value is not None else False)
                 widget = ttk.Checkbutton(parent, variable=var)
                 widget.var = var
                 widget.grid(row=i, column=1, sticky="w", padx=5, pady=4)
             elif ftype == "tri_bool":
                 widget = ttk.Combobox(parent, state="readonly", values=["auto", "true", "false"])
-                widget.set(field.get("default", "auto"))
+                widget.set(str(initial_value) if initial_value is not None else "auto")
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "choice":
                 widget = ttk.Combobox(parent, state="readonly", values=field.get("options", []))
-                if field.get("default") is not None:
-                    widget.set(field.get("default"))
+                if initial_value is not None:
+                    widget.set(str(initial_value))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "multichoice":
                 widget = tk.Listbox(parent, selectmode="multiple", height=5, exportselection=False)
-                for opt in field.get("options", []):
+                options = field.get("options", [])
+                for opt in options:
                     widget.insert("end", opt)
+                if isinstance(initial_value, list):
+                    for idx, opt in enumerate(options):
+                        if opt in initial_value:
+                            widget.selection_set(idx)
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype in {"kv_list", "struct_list"}:
                 widget = tk.Text(parent, height=5)
-                if "default" in field:
-                    widget.insert("1.0", json.dumps(field["default"], ensure_ascii=False, indent=2))
+                if initial_value is not None:
+                    widget.insert("1.0", json.dumps(initial_value, ensure_ascii=False, indent=2))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
                 ttk.Label(parent, text="JSON/YAML list input").grid(row=i, column=2, sticky="w")
             else:
@@ -749,7 +800,8 @@ class App(tk.Tk):
         body = ttk.Frame(dialog)
         body.pack(fill="both", expand=True, padx=10, pady=10)
 
-        fields = self._create_form_fields(body, form)
+        saved_values = self._get_saved_form_values(action_id)
+        fields = self._create_form_fields(body, form, initial_values=saved_values)
 
         actions = ttk.Frame(dialog)
         actions.pack(fill="x", padx=10, pady=(0, 10))
@@ -760,6 +812,12 @@ class App(tk.Tk):
             except EngineError as exc:
                 messagebox.showerror("Execution error", str(exc), parent=dialog)
                 return
+            persisted = {
+                fid: value
+                for fid, value in data.items()
+                if fields[fid][0].get("type") != "secret"
+            }
+            self._save_form_values(action_id, persisted)
             dialog.destroy()
             self._start_action(action_id, data)
 
