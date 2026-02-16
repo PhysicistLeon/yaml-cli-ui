@@ -143,7 +143,7 @@ class App(tk.Tk):
         self.geometry("980x700")
         self.config_path = Path(config_path)
         self.browse_dir = Path(browse_dir) if browse_dir else None
-        self.config: dict[str, Any] = {}
+        self.app_config: dict[str, Any] = {}
         self.engine: PipelineEngine | None = None
         self.run_seq = 0
 
@@ -319,7 +319,7 @@ class App(tk.Tk):
         self.action_history_combos.clear()
         self.action_output_texts.clear()
 
-        for action_id in self.config.get("actions", {}).keys():
+        for action_id in self.app_config.get("actions", {}).keys():
             self._create_action_tab(action_id)
 
     def _set_action_status(self, action_id: str, status: str) -> None:
@@ -360,7 +360,7 @@ class App(tk.Tk):
             child.destroy()
         self.action_buttons.clear()
 
-        actions = self.config.get("actions", {})
+        actions = self.app_config.get("actions", {})
         for index, (action_id, action) in enumerate(actions.items()):
             title = action.get("title", action_id)
             btn = tk.Button(
@@ -379,12 +379,12 @@ class App(tk.Tk):
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
-            self.config = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
-            validate_config(self.config)
-            self.engine = PipelineEngine(self.config)
-            title = self.config.get("app", {}).get("title", "YAML CLI UI")
+            self.app_config = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+            validate_config(self.app_config)
+            self.engine = PipelineEngine(self.app_config)
+            title = self.app_config.get("app", {}).get("title", "YAML CLI UI")
             self.title(title)
-            actions = self.config.get("actions", {})
+            actions = self.app_config.get("actions", {})
             self.run_records.clear()
             self.action_histories = {aid: [] for aid in actions.keys()}
             self.action_running_counts = {aid: 0 for aid in actions.keys()}
@@ -733,7 +733,7 @@ class App(tk.Tk):
         if not self.engine:
             return
 
-        action = self.config.get("actions", {}).get(action_id, {})
+        action = self.app_config.get("actions", {}).get(action_id, {})
         form = action.get("form", {})
 
         if not self._has_editable_fields(form):
