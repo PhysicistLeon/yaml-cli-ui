@@ -22,6 +22,71 @@ FAILED_COLOR = "#e74c3c"
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 
 
+HELP_CONTENT = """Как работает приложение
+1. Выберите YAML-файл с описанием приложения и действий.
+2. Нажмите Reload, чтобы перечитать конфигурацию и обновить кнопки действий.
+3. Нажмите кнопку действия, заполните форму и нажмите Run.
+4. Следите за логами во вкладке All runs и во вкладке конкретного действия.
+
+Как писать YAML (примеры)
+Минимальный пример:
+
+app:
+  title: "Demo YAML CLI UI"
+actions:
+  hello:
+    title: "Сказать привет"
+    form:
+      fields:
+        - id: name
+          label: "Имя"
+          type: string
+          required: true
+    pipeline:
+      - run:
+          cmd: "echo Привет, {{ form.name }}!"
+
+Пример с выбором файлов и параметров:
+
+actions:
+  convert:
+    title: "Конвертация"
+    form:
+      fields:
+        - id: input_file
+          label: "Входной файл"
+          type: path
+          kind: file
+          must_exist: true
+        - id: output_dir
+          label: "Папка результата"
+          type: path
+          kind: dir
+          must_exist: true
+        - id: bitrate
+          label: "Битрейт"
+          type: int
+          widget: spinbox
+          min: 64
+          max: 320
+          step: 32
+          default: 192
+
+FAQ
+Q: Почему кнопка действия стала жёлтой?
+A: Это статус running — действие выполняется.
+
+Q: Что означает красный цвет кнопки?
+A: Выполнение завершилось с ошибкой, подробности смотрите в логах.
+
+Q: Можно ли хранить секреты в YAML?
+A: Лучше использовать поля secret c source: env и передавать секреты через переменные окружения.
+
+Q: Почему не открывается файл из Browse?
+A: Проверьте browse_dir в app.ini, права доступа и существование директории/файла.
+"""
+
+
 def _resolve_ini_path(value: str, ini_path: Path) -> Path:
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
@@ -89,6 +154,7 @@ class App(tk.Tk):
 
         top = ttk.Frame(self)
         top.pack(fill="x", padx=10, pady=8)
+        self._build_menu()
         ttk.Label(top, text="YAML file:").pack(side="left")
         self.path_entry = ttk.Entry(top)
         self.path_entry.pack(side="left", fill="x", expand=True, padx=6)
@@ -112,6 +178,31 @@ class App(tk.Tk):
         self.aggregate_output.pack(fill="both", expand=True)
 
         self.load_config()
+
+    def _build_menu(self) -> None:
+        menu_bar = tk.Menu(self)
+        help_menu = tk.Menu(menu_bar, tearoff=0)
+        help_menu.add_command(label="Помощь", command=self._open_help_window)
+        menu_bar.add_cascade(label="Справка", menu=help_menu)
+        self.config(menu=menu_bar)
+
+    def _open_help_window(self) -> None:
+        help_window = tk.Toplevel(self)
+        help_window.title("Помощь")
+        help_window.transient(self)
+        help_window.geometry("800x600")
+
+        frame = ttk.Frame(help_window)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        text = tk.Text(frame, wrap="word")
+        text.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        scrollbar.pack(side="right", fill="y")
+        text.configure(yscrollcommand=scrollbar.set)
+
+        text.insert("1.0", HELP_CONTENT)
+        text.configure(state="disabled")
 
     def _browse(self) -> None:
         browse_kwargs: dict[str, Any] = {"filetypes": [("YAML", "*.yaml *.yml")]}

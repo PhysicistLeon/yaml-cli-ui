@@ -3,7 +3,7 @@ import types
 
 sys.modules.setdefault("yaml", types.SimpleNamespace())
 
-from yaml_cli_ui.app import load_launch_settings, slider_scale_for_float_field
+from yaml_cli_ui.app import HELP_CONTENT, load_launch_settings, slider_scale_for_float_field
 
 
 def test_slider_scale_for_float_step_precision():
@@ -31,3 +31,9 @@ def test_load_launch_settings_without_file_returns_defaults():
 
     assert settings["default_yaml"] is None
     assert settings["browse_dir"] is None
+
+
+def test_help_content_contains_examples_and_faq():
+    assert "FAQ" in HELP_CONTENT
+    assert "Минимальный пример" in HELP_CONTENT
+    assert "pipeline" in HELP_CONTENT
