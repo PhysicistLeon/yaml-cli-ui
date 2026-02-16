@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import json
-import threading
 import configparser
+import json
+import os
+import threading
 from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
@@ -461,30 +462,47 @@ class App(tk.Tk):
                     snapped = _min_value + int(round((bounded - _min_value) / _step_value)) * _step_value
                     return max(_min_value, min(_max_value, snapped))
 
-                def _sync_from_raw(raw_value: int) -> None:
-                    if state["syncing"]:
+                def _sync_from_raw(
+                    raw_value: int,
+                    _state: dict[str, bool] | None = None,
+                    _normalize=_normalize_raw,
+                    _slider: tk.Scale = slider,
+                    _to_text=_scaled_to_text,
+                    _value_var: tk.StringVar = value_var,
+                    _value_label: ttk.Label | None = value_label,
+                ) -> None:
+                    state_ref = state if _state is None else _state
+                    if state_ref["syncing"]:
                         return
-                    state["syncing"] = True
-                    normalized = _normalize_raw(raw_value)
-                    slider.set(normalized)
-                    text_value = _scaled_to_text(normalized)
-                    value_var.set(text_value)
-                    if value_label is not None:
-                        value_label.configure(text=text_value)
-                    state["syncing"] = False
+                    state_ref["syncing"] = True
+                    normalized = _normalize(raw_value)
+                    _slider.set(normalized)
+                    text_value = _to_text(normalized)
+                    _value_var.set(text_value)
+                    if _value_label is not None:
+                        _value_label.configure(text=text_value)
+                    state_ref["syncing"] = False
 
-                def _on_slider_change(raw_text: str) -> None:
-                    _sync_from_raw(int(float(raw_text)))
+                def _on_slider_change(raw_text: str, _sync=_sync_from_raw) -> None:
+                    _sync(int(float(raw_text)))
 
-                def _on_entry_commit(_event: tk.Event[Any] | None = None) -> None:
-                    if state["syncing"]:
+                def _on_entry_commit(
+                    _event: tk.Event[Any] | None = None,
+                    _state: dict[str, bool] | None = None,
+                    _value_var: tk.StringVar = value_var,
+                    _sync=_sync_from_raw,
+                    _slider: tk.Scale = slider,
+                    _scale: int = scale,
+                ) -> None:
+                    state_ref = state if _state is None else _state
+                    if state_ref["syncing"]:
                         return
                     try:
-                        entered_value = float(value_var.get().strip())
+                        entered_value = float(_value_var.get().strip())
                     except ValueError:
-                        _sync_from_raw(int(slider.get()))
+                        _sync(int(_slider.get()))
                         return
-                    _sync_from_raw(int(round(entered_value * scale)))
+                    _sync(int(round(entered_value * _scale)))
 
                 slider.configure(command=_on_slider_change)
                 value_entry.bind("<Return>", _on_entry_commit)
@@ -604,8 +622,6 @@ class App(tk.Tk):
             if ftype == "secret" and field.get("source") == "env":
                 env_name = field.get("env")
                 if env_name:
-                    import os
-
                     value = os.environ.get(env_name, "")
             data[fid] = value
 
@@ -726,9 +742,6 @@ class App(tk.Tk):
 
         ttk.Button(actions, text="Run", command=on_run).pack(side="right")
         ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side="right", padx=(0, 6))
-
-    def mainloop(self, n: int = 0) -> None:
-        super().mainloop(n)
 
 
 def main() -> None:

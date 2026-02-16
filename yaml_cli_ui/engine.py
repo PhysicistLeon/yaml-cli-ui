@@ -257,38 +257,39 @@ class PipelineEngine:
                 if omit_if_empty and empty(value):
                     continue
 
-                def add(opt_name: str, val: Any | None = None) -> None:
-                    if val is None:
-                        out.append(opt_name)
-                    elif style == "equals":
-                        out.append(f"{opt_name}={val}")
-                    else:
-                        out.extend([opt_name, str(val)])
-
                 if mode == "flag":
                     if value is True:
                         out.append(opt)
                     elif value is False and false_opt:
                         out.append(str(false_opt))
                 elif mode == "value":
-                    add(opt, value)
+                    self._append_option(out, opt, style, value)
                 elif mode == "repeat":
                     values = value if isinstance(value, list) else [value]
                     for entry in values:
                         val = template.format(**entry) if template and isinstance(entry, dict) else (template.format(entry) if template else entry)
-                        add(opt, val)
+                        self._append_option(out, opt, style, val)
                 elif mode == "join":
                     values = value if isinstance(value, list) else [value]
                     rendered = []
                     for entry in values:
                         rendered.append(template.format(**entry) if template and isinstance(entry, dict) else (template.format(entry) if template else str(entry)))
-                    add(opt, item.get("joiner", ",").join(rendered))
+                    self._append_option(out, opt, style, item.get("joiner", ",").join(rendered))
                 else:
                     raise EngineError(f"Unknown mode: {mode}")
                 continue
 
             raise EngineError(f"Unsupported argv item: {item}")
         return out
+
+    @staticmethod
+    def _append_option(out: list[str], opt_name: str, style: str, val: Any | None = None) -> None:
+        if val is None:
+            out.append(opt_name)
+        elif style == "equals":
+            out.append(f"{opt_name}={val}")
+        else:
+            out.extend([opt_name, str(val)])
 
     def _resolve_program(self, program: str, evaluator: SafeEvaluator) -> str:
         runtime = self.config.get("runtime", {})
@@ -440,7 +441,7 @@ class PipelineEngine:
         elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        proc = subprocess.Popen(
+        with subprocess.Popen(
             [program, *argv],
             shell=shell,
             cwd=workdir,
@@ -449,63 +450,63 @@ class PipelineEngine:
             stdout=stdout_target,
             stderr=stderr_target,
             **popen_kwargs,
-        )
-        with self._lock:
-            self._running_processes.setdefault(action_id, []).append(proc)
-
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-        reader_threads: list[threading.Thread] = []
-
-        if proc.stdout is not None:
-            t = threading.Thread(target=self._stream_output, args=("stdout", proc.stdout, stdout_lines, log), daemon=True)
-            reader_threads.append(t)
-            t.start()
-        if proc.stderr is not None:
-            t = threading.Thread(target=self._stream_output, args=("stderr", proc.stderr, stderr_lines, log), daemon=True)
-            reader_threads.append(t)
-            t.start()
-
-        timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
-        deadline = (start + timeout_s) if timeout_s is not None else None
-        try:
-            while True:
-                if cancel_event.is_set():
-                    self._terminate_process(proc)
-                    try:
-                        proc.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        if os.name != "nt":
-                            try:
-                                os.killpg(proc.pid, signal.SIGKILL)
-                            except ProcessLookupError:
-                                pass
-                        else:
-                            proc.kill()
-                        proc.wait()
-                    raise ActionCancelledError("Action was stopped by user")
-
-                if deadline is not None and time.perf_counter() >= deadline:
-                    proc.kill()
-                    proc.wait()
-                    raise subprocess.TimeoutExpired([program, *argv], timeout_s)
-
-                try:
-                    exit_code = proc.wait(timeout=0.1)
-                    if cancel_event.is_set():
-                        raise ActionCancelledError("Action was stopped by user")
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
-        finally:
-            for t in reader_threads:
-                t.join()
+        ) as proc:
             with self._lock:
-                processes = self._running_processes.get(action_id, [])
-                if proc in processes:
-                    processes.remove(proc)
+                self._running_processes.setdefault(action_id, []).append(proc)
 
-        duration_ms = int((time.perf_counter() - start) * 1000)
+            stdout_lines: list[str] = []
+            stderr_lines: list[str] = []
+            reader_threads: list[threading.Thread] = []
+
+            if proc.stdout is not None:
+                t = threading.Thread(target=self._stream_output, args=("stdout", proc.stdout, stdout_lines, log), daemon=True)
+                reader_threads.append(t)
+                t.start()
+            if proc.stderr is not None:
+                t = threading.Thread(target=self._stream_output, args=("stderr", proc.stderr, stderr_lines, log), daemon=True)
+                reader_threads.append(t)
+                t.start()
+
+            timeout_s = (timeout_ms / 1000.0) if timeout_ms else None
+            deadline = (start + timeout_s) if timeout_s is not None else None
+            try:
+                while True:
+                    if cancel_event.is_set():
+                        self._terminate_process(proc)
+                        try:
+                            proc.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            if os.name != "nt":
+                                try:
+                                    os.killpg(proc.pid, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
+                            else:
+                                proc.kill()
+                            proc.wait()
+                        raise ActionCancelledError("Action was stopped by user")
+
+                    if deadline is not None and time.perf_counter() >= deadline:
+                        proc.kill()
+                        proc.wait()
+                        raise subprocess.TimeoutExpired([program, *argv], timeout_s)
+
+                    try:
+                        exit_code = proc.wait(timeout=0.1)
+                        if cancel_event.is_set():
+                            raise ActionCancelledError("Action was stopped by user")
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+            finally:
+                for t in reader_threads:
+                    t.join()
+                with self._lock:
+                    processes = self._running_processes.get(action_id, [])
+                    if proc in processes:
+                        processes.remove(proc)
+
+            duration_ms = int((time.perf_counter() - start) * 1000)
 
         stdout = "\n".join(stdout_lines)
         stderr = "\n".join(stderr_lines)
