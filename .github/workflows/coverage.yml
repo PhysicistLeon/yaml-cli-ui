@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   coverage:
     runs-on: ubuntu-latest
@@ -32,9 +35,42 @@ jobs:
         run: |
           pytest -q --cov=yaml_cli_ui --cov-report=term --cov-report=xml
 
-      - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Build coverage badge JSON from coverage.xml
+        run: |
+          python - <<'PY'
+          import json
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse('coverage.xml').getroot()
+          percent = round(float(root.attrib.get('line-rate', 0.0)) * 100)
+
+          if percent >= 90:
+            color = 'brightgreen'
+          elif percent >= 75:
+            color = 'green'
+          elif percent >= 60:
+            color = 'yellowgreen'
+          elif percent >= 40:
+            color = 'yellow'
+          elif percent >= 20:
+            color = 'orange'
+          else:
+            color = 'red'
+
+          payload = {
+            'schemaVersion': 1,
+            'label': 'coverage',
+            'message': f'{percent}%',
+            'color': color,
+          }
+
+          with open('coverage-badge.json', 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+          PY
+
+      - name: Commit coverage badge JSON
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          files: ./coverage.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: ${{ github.event.repository.private }}
+          commit_message: 'chore: update coverage badge [skip ci]'
+          file_pattern: coverage-badge.json
