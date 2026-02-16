@@ -132,7 +132,12 @@ def _decimal_places(value: Any) -> int:
 
 
 def slider_scale_for_float_field(field: dict[str, Any]) -> int:
-    candidates = [field.get("step"), field.get("default"), field.get("min"), field.get("max")]
+    candidates = [
+        field.get("step"),
+        field.get("default"),
+        field.get("min"),
+        field.get("max"),
+    ]
     decimals = max((_decimal_places(v) for v in candidates), default=0)
     return 10**decimals
 
@@ -149,7 +154,9 @@ def load_ui_state(state_file: Path = STATE_FILE_PATH) -> dict[str, Any]:
 
 def save_ui_state(state: dict[str, Any], state_file: Path = STATE_FILE_PATH) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    state_file.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 class App(tk.Tk):
@@ -251,7 +258,11 @@ class App(tk.Tk):
             initialdir = str(self.browse_dir)
 
         if kind == "dir":
-            selected = filedialog.askdirectory(initialdir=initialdir) if initialdir else filedialog.askdirectory()
+            selected = (
+                filedialog.askdirectory(initialdir=initialdir)
+                if initialdir
+                else filedialog.askdirectory()
+            )
         else:
             dialog_kwargs: dict[str, Any] = {}
             if initialdir:
@@ -261,7 +272,9 @@ class App(tk.Tk):
         if selected:
             selected_path = Path(selected)
             if selected_path.exists():
-                self.browse_dir = selected_path if selected_path.is_dir() else selected_path.parent
+                self.browse_dir = (
+                    selected_path if selected_path.is_dir() else selected_path.parent
+                )
             entry.delete(0, "end")
             entry.insert(0, selected)
 
@@ -306,7 +319,10 @@ class App(tk.Tk):
 
     def _refresh_action_history(self, action_id: str) -> None:
         combo = self.action_history_combos[action_id]
-        values = [self._run_label(run_id) for run_id in self.action_histories.get(action_id, [])]
+        values = [
+            self._run_label(run_id)
+            for run_id in self.action_histories.get(action_id, [])
+        ]
         combo["values"] = values
 
     def _create_action_tab(self, action_id: str) -> None:
@@ -320,7 +336,10 @@ class App(tk.Tk):
         var = tk.StringVar()
         combo = ttk.Combobox(row, state="readonly", textvariable=var)
         combo.pack(side="left", fill="x", expand=True, padx=6)
-        combo.bind("<<ComboboxSelected>>", lambda _e, aid=action_id: self._on_history_selected(aid))
+        combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e, aid=action_id: self._on_history_selected(aid),
+        )
 
         output = tk.Text(tab, height=12)
         output.pack(fill="both", expand=True, padx=4, pady=(0, 4))
@@ -368,7 +387,9 @@ class App(tk.Tk):
         self._refresh_action_history(action_id)
         self._select_action_run(action_id, run_id)
 
-        self.action_running_counts[action_id] = self.action_running_counts.get(action_id, 0) + 1
+        self.action_running_counts[action_id] = (
+            self.action_running_counts.get(action_id, 0) + 1
+        )
         self._set_action_status(action_id, "running")
         return run_id
 
@@ -418,7 +439,9 @@ class App(tk.Tk):
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
-            self.app_config = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+            self.app_config = yaml.safe_load(
+                self.config_path.read_text(encoding="utf-8")
+            )
             validate_config(self.app_config)
             self.engine = PipelineEngine(self.app_config)
             title = self.app_config.get("app", {}).get("title", "YAML CLI UI")
@@ -494,17 +517,38 @@ class App(tk.Tk):
             ftype = field.get("type", "string")
             widget_hint = field.get("widget")
             initial_value = initial_values.get(fid, field.get("default"))
-            slider_opts = field.get("slider", {}) if isinstance(field.get("slider"), dict) else {}
-            ttk.Label(parent, text=label).grid(row=i, column=0, sticky="w", padx=5, pady=4)
+            slider_opts = (
+                field.get("slider", {}) if isinstance(field.get("slider"), dict) else {}
+            )
+            ttk.Label(parent, text=label).grid(
+                row=i, column=0, sticky="w", padx=5, pady=4
+            )
 
             widget: Any
-            if ftype in {"int", "float"} and widget_hint == "slider" and "min" in field and "max" in field:
+            if (
+                ftype in {"int", "float"}
+                and widget_hint == "slider"
+                and "min" in field
+                and "max" in field
+            ):
                 scale = slider_scale_for_float_field(field) if ftype == "float" else 1
                 min_value = int(round(float(field["min"]) * scale))
                 max_value = int(round(float(field["max"]) * scale))
-                step_value = max(1, int(round(float(field.get("step", 1 if ftype == "int" else 0.1)) * scale)))
-                default_raw = initial_value if initial_value is not None else field.get("min", 0)
-                display_decimals = _decimal_places(field.get("step", 0)) if ftype == "float" else 0
+                step_value = max(
+                    1,
+                    int(
+                        round(
+                            float(field.get("step", 1 if ftype == "int" else 0.1))
+                            * scale
+                        )
+                    ),
+                )
+                default_raw = (
+                    initial_value if initial_value is not None else field.get("min", 0)
+                )
+                display_decimals = (
+                    _decimal_places(field.get("step", 0)) if ftype == "float" else 0
+                )
 
                 wrapper = ttk.Frame(parent)
                 wrapper.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
@@ -537,11 +581,21 @@ class App(tk.Tk):
 
                 state = {"syncing": False}
 
-                def _scaled_to_text(raw_value: int, *, _scale: int = scale, _ftype: str = ftype, _display_decimals: int = display_decimals) -> str:
+                def _scaled_to_text(
+                    raw_value: int,
+                    *,
+                    _scale: int = scale,
+                    _ftype: str = ftype,
+                    _display_decimals: int = display_decimals,
+                ) -> str:
                     shown = raw_value / _scale
                     if _ftype == "int":
                         return str(int(round(shown)))
-                    return f"{shown:.{_display_decimals}f}" if _display_decimals > 0 else str(shown)
+                    return (
+                        f"{shown:.{_display_decimals}f}"
+                        if _display_decimals > 0
+                        else str(shown)
+                    )
 
                 def _normalize_raw(
                     raw_value: int,
@@ -551,7 +605,10 @@ class App(tk.Tk):
                     _step_value: int = step_value,
                 ) -> int:
                     bounded = max(_min_value, min(_max_value, raw_value))
-                    snapped = _min_value + int(round((bounded - _min_value) / _step_value)) * _step_value
+                    snapped = (
+                        _min_value
+                        + int(round((bounded - _min_value) / _step_value)) * _step_value
+                    )
                     return max(_min_value, min(_max_value, snapped))
 
                 sync_from_raw = partial(
@@ -563,7 +620,9 @@ class App(tk.Tk):
                     value_var=value_var,
                     value_label=value_label,
                 )
-                slider_change_handler = partial(self._on_slider_change, sync=sync_from_raw)
+                slider_change_handler = partial(
+                    self._on_slider_change, sync=sync_from_raw
+                )
                 entry_commit_handler = partial(
                     self._on_slider_entry_commit,
                     state=state,
@@ -579,12 +638,28 @@ class App(tk.Tk):
 
                 sync_from_raw(int(round(float(default_raw) * scale)))
 
-                widget = {"kind": "slider", "control": slider, "scale": scale, "type": ftype}
+                widget = {
+                    "kind": "slider",
+                    "control": slider,
+                    "scale": scale,
+                    "type": ftype,
+                }
             elif ftype in {"string", "int", "float", "secret"}:
-                show = "*" if ftype == "secret" and field.get("source", "inline") == "inline" else ""
-                if ftype in {"int", "float"} and widget_hint == "spinbox" and "min" in field and "max" in field:
+                show = (
+                    "*"
+                    if ftype == "secret" and field.get("source", "inline") == "inline"
+                    else ""
+                )
+                if (
+                    ftype in {"int", "float"}
+                    and widget_hint == "spinbox"
+                    and "min" in field
+                    and "max" in field
+                ):
                     increment = field.get("step", 1 if ftype == "int" else 0.1)
-                    widget = ttk.Spinbox(parent, from_=field["min"], to=field["max"], increment=increment)
+                    widget = ttk.Spinbox(
+                        parent, from_=field["min"], to=field["max"], increment=increment
+                    )
                 else:
                     widget = ttk.Entry(parent, show=show)
                 if initial_value is not None:
@@ -611,21 +686,29 @@ class App(tk.Tk):
                     widget.insert("1.0", str(initial_value))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "bool":
-                var = tk.BooleanVar(value=bool(initial_value) if initial_value is not None else False)
+                var = tk.BooleanVar(
+                    value=bool(initial_value) if initial_value is not None else False
+                )
                 widget = ttk.Checkbutton(parent, variable=var)
                 widget.var = var
                 widget.grid(row=i, column=1, sticky="w", padx=5, pady=4)
             elif ftype == "tri_bool":
-                widget = ttk.Combobox(parent, state="readonly", values=["auto", "true", "false"])
+                widget = ttk.Combobox(
+                    parent, state="readonly", values=["auto", "true", "false"]
+                )
                 widget.set(str(initial_value) if initial_value is not None else "auto")
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "choice":
-                widget = ttk.Combobox(parent, state="readonly", values=field.get("options", []))
+                widget = ttk.Combobox(
+                    parent, state="readonly", values=field.get("options", [])
+                )
                 if initial_value is not None:
                     widget.set(str(initial_value))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
             elif ftype == "multichoice":
-                widget = tk.Listbox(parent, selectmode="multiple", height=5, exportselection=False)
+                widget = tk.Listbox(
+                    parent, selectmode="multiple", height=5, exportselection=False
+                )
                 options = field.get("options", [])
                 for opt in options:
                     widget.insert("end", opt)
@@ -637,9 +720,13 @@ class App(tk.Tk):
             elif ftype in {"kv_list", "struct_list"}:
                 widget = tk.Text(parent, height=5)
                 if initial_value is not None:
-                    widget.insert("1.0", json.dumps(initial_value, ensure_ascii=False, indent=2))
+                    widget.insert(
+                        "1.0", json.dumps(initial_value, ensure_ascii=False, indent=2)
+                    )
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
-                ttk.Label(parent, text="JSON/YAML list input").grid(row=i, column=2, sticky="w")
+                ttk.Label(parent, text="JSON/YAML list input").grid(
+                    row=i, column=2, sticky="w"
+                )
             else:
                 widget = ttk.Entry(parent)
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
@@ -647,7 +734,9 @@ class App(tk.Tk):
         parent.columnconfigure(1, weight=1)
         return fields
 
-    def _collect_form(self, fields: dict[str, tuple[dict[str, Any], Any]]) -> dict[str, Any]:
+    def _collect_form(
+        self, fields: dict[str, tuple[dict[str, Any], Any]]
+    ) -> dict[str, Any]:
         data: dict[str, Any] = {}
         errors: list[str] = []
         for fid, (field, widget) in fields.items():
@@ -703,7 +792,9 @@ class App(tk.Tk):
             raise EngineError("\n".join(errors))
         return data
 
-    def _run_action_worker(self, run_id: int, action_id: str, form: dict[str, Any]) -> None:
+    def _run_action_worker(
+        self, run_id: int, action_id: str, form: dict[str, Any]
+    ) -> None:
         assert self.engine is not None
 
         def logger(msg: str) -> None:
@@ -732,7 +823,9 @@ class App(tk.Tk):
             run["status"] = "done"
             run["result"] = results
             self._append_run_log(run_id, "Done")
-            self._append_run_log(run_id, json.dumps(results, ensure_ascii=False, indent=2))
+            self._append_run_log(
+                run_id, json.dumps(results, ensure_ascii=False, indent=2)
+            )
         else:
             run["status"] = "failed"
             run["error"] = error
@@ -740,7 +833,9 @@ class App(tk.Tk):
             if not cancelled:
                 messagebox.showerror("Execution error", error or "Unknown error")
 
-        self.action_running_counts[action_id] = max(0, self.action_running_counts.get(action_id, 1) - 1)
+        self.action_running_counts[action_id] = max(
+            0, self.action_running_counts.get(action_id, 1) - 1
+        )
         if self.action_running_counts[action_id] > 0:
             self._set_action_status(action_id, "running")
         else:
@@ -752,7 +847,9 @@ class App(tk.Tk):
     def _start_action(self, action_id: str, form: dict[str, Any]) -> None:
         run_id = self._new_run(action_id)
         self._append_run_log(run_id, "Started")
-        worker = threading.Thread(target=self._run_action_worker, args=(run_id, action_id, form), daemon=True)
+        worker = threading.Thread(
+            target=self._run_action_worker, args=(run_id, action_id, form), daemon=True
+        )
         worker.start()
 
     def _has_editable_fields(self, form: dict[str, Any]) -> bool:
@@ -766,7 +863,6 @@ class App(tk.Tk):
                 continue
             return True
         return False
-
 
     def _on_action_button_click(self, action_id: str) -> None:
         if self.action_running_counts.get(action_id, 0) > 0:
@@ -822,13 +918,19 @@ class App(tk.Tk):
             self._start_action(action_id, data)
 
         ttk.Button(actions, text="Run", command=on_run).pack(side="right")
-        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side="right", padx=(0, 6))
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(
+            side="right", padx=(0, 6)
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="YAML-driven CLI UI")
     parser.add_argument("config", nargs="?", default=None)
-    parser.add_argument("--settings", help="Path to INI file with [ui] default_yaml and browse_dir.", default='app.ini')
+    parser.add_argument(
+        "--settings",
+        help="Path to INI file with [ui] default_yaml and browse_dir.",
+        default="app.ini",
+    )
     args = parser.parse_args()
 
     settings = load_launch_settings(args.settings)

@@ -4,19 +4,36 @@ import sys
 import threading
 import time
 
-from yaml_cli_ui.engine import ActionCancelledError, PipelineEngine, SafeEvaluator, render_template, to_dotdict
+from yaml_cli_ui.engine import (
+    ActionCancelledError,
+    PipelineEngine,
+    SafeEvaluator,
+    render_template,
+    to_dotdict,
+)
 
 
 def test_template_eval():
-    ev = SafeEvaluator({"form": {"x": 3}, "len": len, "empty": lambda x: x in (None, ""), "exists": lambda _: True})
+    ev = SafeEvaluator(
+        {
+            "form": {"x": 3},
+            "len": len,
+            "empty": lambda x: x in (None, ""),
+            "exists": lambda _: True,
+        }
+    )
     assert render_template("${form['x']}", ev) == 3
 
 
 def test_argv_serialization_modes():
-    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+    engine = PipelineEngine(
+        {"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}}
+    )
     ev = SafeEvaluator(
         {
-            "form": to_dotdict({"flag": True, "items": ["ru", "en"], "tri": "false", "name": "abc"}),
+            "form": to_dotdict(
+                {"flag": True, "items": ["ru", "en"], "tri": "false", "name": "abc"}
+            ),
             "vars": {},
             "env": {},
             "step": {},
@@ -35,7 +52,12 @@ def test_argv_serialization_modes():
             {"--flag": "${form.flag}"},
             {"--name": "${form.name}"},
             {"opt": "--langs", "from": "${form.items}", "mode": "join", "joiner": ","},
-            {"opt": "--switch", "from": "${form.tri}", "mode": "flag", "false_opt": "--no-switch"},
+            {
+                "opt": "--switch",
+                "from": "${form.tri}",
+                "mode": "flag",
+                "false_opt": "--no-switch",
+            },
         ],
         ev,
     )
@@ -51,7 +73,9 @@ def test_argv_serialization_modes():
 
 
 def test_stream_output_handles_carriage_return_progress():
-    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+    engine = PipelineEngine(
+        {"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}}
+    )
     stream = io.StringIO("10%\r20%\rdone\n")
     captured = []
     logs = []
@@ -63,7 +87,9 @@ def test_stream_output_handles_carriage_return_progress():
 
 
 def test_python_program_detection():
-    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+    engine = PipelineEngine(
+        {"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}}
+    )
 
     assert engine._looks_like_python_program("python")
     assert engine._looks_like_python_program("python.exe")
@@ -74,7 +100,9 @@ def test_python_program_detection():
 
 
 def test_sanitize_child_env_for_embedded_tk():
-    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+    engine = PipelineEngine(
+        {"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}}
+    )
     env = {
         "PATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345;C:\Windows\System32",
         "TCL_LIBRARY": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tcl_data",
