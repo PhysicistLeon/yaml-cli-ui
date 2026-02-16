@@ -1,6 +1,7 @@
 # YAML CLI UI
 
 [![Pylint](https://img.shields.io/github/actions/workflow/status/PhysicistLeon/yaml-cli-ui/pylint.yml?branch=main&label=pylint)](https://github.com/PhysicistLeon/yaml-cli-ui/actions/workflows/pylint.yml)
+[![Ruff](https://img.shields.io/github/actions/workflow/status/PhysicistLeon/yaml-cli-ui/lint.yml?branch=main&label=ruff)](https://github.com/PhysicistLeon/yaml-cli-ui/actions/workflows/lint.yml)
 
 Python app that loads workflow YAML, renders top-level actions as launch buttons, opens per-action parameter dialogs, serializes argv deterministically, and executes CLI pipelines with safe `subprocess.run(..., shell=False)` defaults.
 
