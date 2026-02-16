@@ -125,6 +125,35 @@ class App(tk.Tk):
             self.path_entry.insert(0, selected)
             self.load_config()
 
+    def _pick_path(self, field: dict[str, Any], entry: ttk.Entry) -> None:
+        kind = field.get("kind")
+        current_value = entry.get().strip()
+        current_path = Path(current_value).expanduser() if current_value else None
+
+        initialdir: str | None = None
+        if current_path:
+            if current_path.exists() and current_path.is_dir():
+                initialdir = str(current_path)
+            else:
+                initialdir = str(current_path.parent)
+        elif self.browse_dir:
+            initialdir = str(self.browse_dir)
+
+        if kind == "dir":
+            selected = filedialog.askdirectory(initialdir=initialdir) if initialdir else filedialog.askdirectory()
+        else:
+            dialog_kwargs: dict[str, Any] = {}
+            if initialdir:
+                dialog_kwargs["initialdir"] = initialdir
+            selected = filedialog.askopenfilename(**dialog_kwargs)
+
+        if selected:
+            selected_path = Path(selected)
+            if selected_path.exists():
+                self.browse_dir = selected_path if selected_path.is_dir() else selected_path.parent
+            entry.delete(0, "end")
+            entry.insert(0, selected)
+
     def _run_label(self, run_id: int) -> str:
         run = self.run_records[run_id]
         return f"#{run_id} [{run['started_at']}] {run['status']}"
@@ -388,7 +417,7 @@ class App(tk.Tk):
                 _sync_from_raw(int(round(float(default_raw) * scale)))
 
                 widget = {"kind": "slider", "control": slider, "scale": scale, "type": ftype}
-            elif ftype in {"string", "path", "int", "float", "secret"}:
+            elif ftype in {"string", "int", "float", "secret"}:
                 show = "*" if ftype == "secret" and field.get("source", "inline") == "inline" else ""
                 if ftype in {"int", "float"} and widget_hint == "spinbox" and "min" in field and "max" in field:
                     increment = field.get("step", 1 if ftype == "int" else 0.1)
@@ -398,6 +427,21 @@ class App(tk.Tk):
                 if "default" in field:
                     widget.insert(0, str(field["default"]))
                 widget.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
+            elif ftype == "path":
+                path_wrapper = ttk.Frame(parent)
+                path_wrapper.grid(row=i, column=1, sticky="ew", padx=5, pady=4)
+                path_wrapper.columnconfigure(0, weight=1)
+
+                widget = ttk.Entry(path_wrapper)
+                if "default" in field:
+                    widget.insert(0, str(field["default"]))
+                widget.grid(row=0, column=0, sticky="ew")
+
+                ttk.Button(
+                    path_wrapper,
+                    text="Browse…",
+                    command=lambda _f=field, _entry=widget: self._pick_path(_f, _entry),
+                ).grid(row=0, column=1, padx=(6, 0))
             elif ftype == "text":
                 widget = tk.Text(parent, height=4)
                 if "default" in field:
