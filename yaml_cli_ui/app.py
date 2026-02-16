@@ -5,6 +5,7 @@ import configparser
 import json
 import os
 import threading
+from functools import partial
 from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
@@ -395,6 +396,51 @@ class App(tk.Tk):
         except (OSError, yaml.YAMLError, EngineError, TypeError, ValueError) as exc:
             messagebox.showerror("Config error", str(exc))
 
+    @staticmethod
+    def _sync_slider_raw_value(
+        raw_value: int,
+        *,
+        state: dict[str, bool],
+        normalize: Any,
+        slider: tk.Scale,
+        to_text: Any,
+        value_var: tk.StringVar,
+        value_label: ttk.Label | None,
+    ) -> None:
+        if state["syncing"]:
+            return
+        state["syncing"] = True
+        normalized = normalize(raw_value)
+        slider.set(normalized)
+        text_value = to_text(normalized)
+        value_var.set(text_value)
+        if value_label is not None:
+            value_label.configure(text=text_value)
+        state["syncing"] = False
+
+    @staticmethod
+    def _on_slider_change(raw_text: str, *, sync: Any) -> None:
+        sync(int(float(raw_text)))
+
+    @staticmethod
+    def _on_slider_entry_commit(
+        _event: tk.Event[Any] | None = None,
+        *,
+        state: dict[str, bool],
+        value_var: tk.StringVar,
+        sync: Any,
+        slider: tk.Scale,
+        scale: int,
+    ) -> None:
+        if state["syncing"]:
+            return
+        try:
+            entered_value = float(value_var.get().strip())
+        except ValueError:
+            sync(int(slider.get()))
+            return
+        sync(int(round(entered_value * scale)))
+
     def _create_form_fields(self, parent: tk.Widget, form: dict[str, Any]) -> dict[str, tuple[dict[str, Any], Any]]:
         fields: dict[str, tuple[dict[str, Any], Any]] = {}
         for i, field in enumerate(form.get("fields", [])):
@@ -462,51 +508,30 @@ class App(tk.Tk):
                     snapped = _min_value + int(round((bounded - _min_value) / _step_value)) * _step_value
                     return max(_min_value, min(_max_value, snapped))
 
-                def _sync_from_raw(
-                    raw_value: int,
-                    _state: dict[str, bool] = state,
-                    _normalize=_normalize_raw,
-                    _slider: tk.Scale = slider,
-                    _to_text=_scaled_to_text,
-                    _value_var: tk.StringVar = value_var,
-                    _value_label: ttk.Label | None = value_label,
-                ) -> None:
-                    if _state["syncing"]:
-                        return
-                    _state["syncing"] = True
-                    normalized = _normalize(raw_value)
-                    _slider.set(normalized)
-                    text_value = _to_text(normalized)
-                    _value_var.set(text_value)
-                    if _value_label is not None:
-                        _value_label.configure(text=text_value)
-                    _state["syncing"] = False
+                sync_from_raw = partial(
+                    self._sync_slider_raw_value,
+                    state=state,
+                    normalize=_normalize_raw,
+                    slider=slider,
+                    to_text=_scaled_to_text,
+                    value_var=value_var,
+                    value_label=value_label,
+                )
+                slider_change_handler = partial(self._on_slider_change, sync=sync_from_raw)
+                entry_commit_handler = partial(
+                    self._on_slider_entry_commit,
+                    state=state,
+                    value_var=value_var,
+                    sync=sync_from_raw,
+                    slider=slider,
+                    scale=scale,
+                )
 
-                def _on_slider_change(raw_text: str, _sync=_sync_from_raw) -> None:
-                    _sync(int(float(raw_text)))
+                slider.configure(command=slider_change_handler)
+                value_entry.bind("<Return>", entry_commit_handler)
+                value_entry.bind("<FocusOut>", entry_commit_handler)
 
-                def _on_entry_commit(
-                    _event: tk.Event[Any] | None = None,
-                    _state: dict[str, bool] = state,
-                    _value_var: tk.StringVar = value_var,
-                    _sync=_sync_from_raw,
-                    _slider: tk.Scale = slider,
-                    _scale: int = scale,
-                ) -> None:
-                    if _state["syncing"]:
-                        return
-                    try:
-                        entered_value = float(_value_var.get().strip())
-                    except ValueError:
-                        _sync(int(_slider.get()))
-                        return
-                    _sync(int(round(entered_value * _scale)))
-
-                slider.configure(command=_on_slider_change)
-                value_entry.bind("<Return>", _on_entry_commit)
-                value_entry.bind("<FocusOut>", _on_entry_commit)
-
-                _sync_from_raw(int(round(float(default_raw) * scale)))
+                sync_from_raw(int(round(float(default_raw) * scale)))
 
                 widget = {"kind": "slider", "control": slider, "scale": scale, "type": ftype}
             elif ftype in {"string", "int", "float", "secret"}:
