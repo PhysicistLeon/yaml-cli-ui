@@ -5,6 +5,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -129,6 +130,19 @@ class PipelineEngine:
         self._cancel_events: dict[str, threading.Event] = {}
         self._active_runs: dict[str, int] = {}
         self._running_processes: dict[str, list[subprocess.Popen[str]]] = {}
+
+    def _looks_like_python_program(self, program: str) -> bool:
+        name = Path(program).name.lower()
+        return name in {"python", "python.exe", "python3", "python3.exe"}
+
+    def _sanitize_child_env_for_embedded_tk(self, env: dict[str, str]) -> dict[str, str]:
+        sanitized = dict(env)
+        for key in ("TCL_LIBRARY", "TK_LIBRARY", "TCLLIBPATH", "PYTHONHOME", "PYTHONPATH"):
+            sanitized.pop(key, None)
+        for key, value in list(sanitized.items()):
+            if isinstance(value, str) and "_MEI" in value:
+                sanitized.pop(key, None)
+        return sanitized
 
     def stop_action(self, action_id: str) -> None:
         with self._lock:
@@ -407,6 +421,8 @@ class PipelineEngine:
             env[k] = str(render_template(v, evaluator))
         for k, v in run_def.get("env", {}).items():
             env[k] = str(render_template(v, evaluator))
+        if getattr(sys, "frozen", False) and self._looks_like_python_program(program):
+            env = self._sanitize_child_env_for_embedded_tk(env)
 
         stdout_mode = run_def.get("stdout", "capture" if run_def.get("capture", True) else "inherit")
         stderr_mode = run_def.get("stderr", "capture" if run_def.get("capture", True) else "inherit")
