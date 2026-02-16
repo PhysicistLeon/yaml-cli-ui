@@ -91,15 +91,33 @@ class SafeEvaluator:
             raise EngineError(f"Invalid expression syntax: {expression}") from exc
         for node in ast.walk(tree):
             if not isinstance(node, self.ALLOWED):
-                raise EngineError(f"Forbidden expression construct: {type(node).__name__}")
+                raise EngineError(
+                    f"Forbidden expression construct: {type(node).__name__}"
+                )
             if isinstance(node, ast.Call):
-                if not isinstance(node.func, ast.Name) or node.func.id not in {"len", "empty", "exists"}:
+                if not isinstance(node.func, ast.Name) or node.func.id not in {
+                    "len",
+                    "empty",
+                    "exists",
+                }:
                     raise EngineError("Only len/empty/exists calls are allowed")
         try:
             # Controlled eval over a pre-validated AST and empty builtins.
-            return eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context)  # pylint: disable=eval-used
-        except (NameError, AttributeError, KeyError, IndexError, TypeError, ValueError, ZeroDivisionError) as exc:
-            raise EngineError(f"Expression evaluation failed: {expression}: {exc}") from exc
+            return eval(  # pylint: disable=eval-used
+                compile(tree, "<expr>", "eval"), {"__builtins__": {}}, self.context
+            )
+        except (
+            NameError,
+            AttributeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            ZeroDivisionError,
+        ) as exc:
+            raise EngineError(
+                f"Expression evaluation failed: {expression}: {exc}"
+            ) from exc
 
 
 def render_template(value: Any, evaluator: SafeEvaluator) -> Any:
@@ -137,9 +155,17 @@ class PipelineEngine:
         name = Path(program).name.lower()
         return name in {"python", "python.exe", "python3", "python3.exe"}
 
-    def _sanitize_child_env_for_embedded_tk(self, env: dict[str, str]) -> dict[str, str]:
+    def _sanitize_child_env_for_embedded_tk(
+        self, env: dict[str, str]
+    ) -> dict[str, str]:
         sanitized = dict(env)
-        for key in ("TCL_LIBRARY", "TK_LIBRARY", "TCLLIBPATH", "PYTHONHOME", "PYTHONPATH"):
+        for key in (
+            "TCL_LIBRARY",
+            "TK_LIBRARY",
+            "TCLLIBPATH",
+            "PYTHONHOME",
+            "PYTHONPATH",
+        ):
             sanitized.pop(key, None)
         for key, value in list(sanitized.items()):
             if isinstance(value, str) and "_MEI" in value:
@@ -174,7 +200,12 @@ class PipelineEngine:
             if proc.poll() is None:
                 proc.terminate()
 
-    def _base_context(self, form_data: dict[str, Any], step_results: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _base_context(
+        self,
+        form_data: dict[str, Any],
+        step_results: dict[str, Any],
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         resolved_vars = {}
         vars_def = self.config.get("vars", {})
         for key, value in vars_def.items():
@@ -205,7 +236,9 @@ class PipelineEngine:
         ctx["vars"] = to_dotdict(resolved_vars)
         return ctx
 
-    def serialize_argv(self, argv_def: list[Any], evaluator: SafeEvaluator) -> list[str]:
+    def serialize_argv(
+        self, argv_def: list[Any], evaluator: SafeEvaluator
+    ) -> list[str]:
         out: list[str] = []
         for item in argv_def:
             if isinstance(item, str):
@@ -267,14 +300,24 @@ class PipelineEngine:
                 elif mode == "repeat":
                     values = value if isinstance(value, list) else [value]
                     for entry in values:
-                        val = template.format(**entry) if template and isinstance(entry, dict) else (template.format(entry) if template else entry)
+                        val = (
+                            template.format(**entry)
+                            if template and isinstance(entry, dict)
+                            else (template.format(entry) if template else entry)
+                        )
                         self._append_option(out, opt, style, val)
                 elif mode == "join":
                     values = value if isinstance(value, list) else [value]
                     rendered = []
                     for entry in values:
-                        rendered.append(template.format(**entry) if template and isinstance(entry, dict) else (template.format(entry) if template else str(entry)))
-                    self._append_option(out, opt, style, item.get("joiner", ",").join(rendered))
+                        rendered.append(
+                            template.format(**entry)
+                            if template and isinstance(entry, dict)
+                            else (template.format(entry) if template else str(entry))
+                        )
+                    self._append_option(
+                        out, opt, style, item.get("joiner", ",").join(rendered)
+                    )
                 else:
                     raise EngineError(f"Unknown mode: {mode}")
                 continue
@@ -283,7 +326,9 @@ class PipelineEngine:
         return out
 
     @staticmethod
-    def _append_option(out: list[str], opt_name: str, style: str, val: Any | None = None) -> None:
+    def _append_option(
+        out: list[str], opt_name: str, style: str, val: Any | None = None
+    ) -> None:
         if val is None:
             out.append(opt_name)
         elif style == "equals":
@@ -294,12 +339,18 @@ class PipelineEngine:
     def _resolve_program(self, program: str, evaluator: SafeEvaluator) -> str:
         runtime = self.config.get("runtime", {})
         python_runtime = runtime.get("python", {}) if isinstance(runtime, dict) else {}
-        python_executable = python_runtime.get("executable") if isinstance(python_runtime, dict) else None
+        python_executable = (
+            python_runtime.get("executable")
+            if isinstance(python_runtime, dict)
+            else None
+        )
         if program == "python" and python_executable:
             return str(render_template(python_executable, evaluator))
         return program
 
-    def run_action(self, action_id: str, form_data: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
+    def run_action(
+        self, action_id: str, form_data: dict[str, Any], log: Callable[[str], None]
+    ) -> dict[str, Any]:
         actions = self.config.get("actions", {})
         if action_id not in actions:
             raise EngineError(f"Unknown action: {action_id}")
@@ -320,7 +371,9 @@ class PipelineEngine:
 
         try:
             step_results: dict[str, Any] = {}
-            self._run_steps(pipeline, form_data, step_results, log, {}, action_id, event)
+            self._run_steps(
+                pipeline, form_data, step_results, log, {}, action_id, event
+            )
             return step_results
         finally:
             with self._lock:
@@ -345,7 +398,7 @@ class PipelineEngine:
         for step in steps:
             if cancel_event.is_set():
                 raise ActionCancelledError("Action was stopped by user")
-            step_id = step.get("id", f"step_{len(step_results)+1}")
+            step_id = step.get("id", f"step_{len(step_results) + 1}")
             ctx = self._base_context(form_data, step_results, scope)
             evaluator = SafeEvaluator(ctx)
             if "when" in step and not bool(render_template(step["when"], evaluator)):
@@ -355,15 +408,27 @@ class PipelineEngine:
 
             try:
                 if "run" in step:
-                    result = self._run_command(step_id, step["run"], evaluator, log, action_id, cancel_event)
+                    result = self._run_command(
+                        step_id, step["run"], evaluator, log, action_id, cancel_event
+                    )
                     step_results[step_id] = result.__dict__
                     if result.exit_code != 0 and not continue_on_error:
-                        raise EngineError(f"Step {step_id} failed with exit code {result.exit_code}")
+                        raise EngineError(
+                            f"Step {step_id} failed with exit code {result.exit_code}"
+                        )
                 elif "pipeline" in step:
                     nested = step["pipeline"]
                     if not isinstance(nested, list):
                         raise EngineError("pipeline step requires list")
-                    self._run_steps(nested, form_data, step_results, log, scope, action_id, cancel_event)
+                    self._run_steps(
+                        nested,
+                        form_data,
+                        step_results,
+                        log,
+                        scope,
+                        action_id,
+                        cancel_event,
+                    )
                 elif "foreach" in step:
                     foreach = step["foreach"]
                     items = render_template(foreach.get("in"), evaluator)
@@ -375,16 +440,38 @@ class PipelineEngine:
                         local_scope = dict(scope)
                         local_scope[var_name] = to_dotdict(value)
                         local_scope["loop"] = to_dotdict({"index": index})
-                        self._run_steps(nested_steps, form_data, step_results, log, local_scope, action_id, cancel_event)
+                        self._run_steps(
+                            nested_steps,
+                            form_data,
+                            step_results,
+                            log,
+                            local_scope,
+                            action_id,
+                            cancel_event,
+                        )
                 else:
                     raise EngineError(f"Unknown step type in {step_id}")
-            except (EngineError, ActionCancelledError, OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError) as exc:
+            except (
+                EngineError,
+                ActionCancelledError,
+                OSError,
+                subprocess.SubprocessError,
+                ValueError,
+                TypeError,
+                KeyError,
+            ) as exc:
                 if continue_on_error:
                     log(f"[warn] {step_id}: {exc}")
                     continue
                 raise
 
-    def _stream_output(self, name: str, stream: TextIO, collector: list[str], log: Callable[[str], None]) -> None:
+    def _stream_output(
+        self,
+        name: str,
+        stream: TextIO,
+        collector: list[str],
+        log: Callable[[str], None],
+    ) -> None:
         buffer = ""
         while True:
             chunk = stream.read(1)
@@ -414,7 +501,9 @@ class PipelineEngine:
         program = self._resolve_program(raw_program, evaluator)
         argv_def = run_def.get("argv", [])
         argv = self.serialize_argv(argv_def, evaluator)
-        shell = bool(run_def.get("shell", self.config.get("app", {}).get("shell", False)))
+        shell = bool(
+            run_def.get("shell", self.config.get("app", {}).get("shell", False))
+        )
         timeout_ms = run_def.get("timeout_ms")
         workdir = run_def.get("workdir") or self.config.get("app", {}).get("workdir")
         workdir = render_template(workdir, evaluator) if workdir else None
@@ -427,8 +516,12 @@ class PipelineEngine:
         if getattr(sys, "frozen", False) and self._looks_like_python_program(program):
             env = self._sanitize_child_env_for_embedded_tk(env)
 
-        stdout_mode = run_def.get("stdout", "capture" if run_def.get("capture", True) else "inherit")
-        stderr_mode = run_def.get("stderr", "capture" if run_def.get("capture", True) else "inherit")
+        stdout_mode = run_def.get(
+            "stdout", "capture" if run_def.get("capture", True) else "inherit"
+        )
+        stderr_mode = run_def.get(
+            "stderr", "capture" if run_def.get("capture", True) else "inherit"
+        )
 
         stdout_target = subprocess.PIPE if stdout_mode == "capture" else None
         stderr_target = subprocess.PIPE if stderr_mode == "capture" else None
@@ -459,11 +552,19 @@ class PipelineEngine:
             reader_threads: list[threading.Thread] = []
 
             if proc.stdout is not None:
-                t = threading.Thread(target=self._stream_output, args=("stdout", proc.stdout, stdout_lines, log), daemon=True)
+                t = threading.Thread(
+                    target=self._stream_output,
+                    args=("stdout", proc.stdout, stdout_lines, log),
+                    daemon=True,
+                )
                 reader_threads.append(t)
                 t.start()
             if proc.stderr is not None:
-                t = threading.Thread(target=self._stream_output, args=("stderr", proc.stderr, stderr_lines, log), daemon=True)
+                t = threading.Thread(
+                    target=self._stream_output,
+                    args=("stderr", proc.stderr, stderr_lines, log),
+                    daemon=True,
+                )
                 reader_threads.append(t)
                 t.start()
 
