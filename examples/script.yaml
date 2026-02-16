@@ -1,0 +1,39 @@
+version: 1
+
+vars:
+  workdir: "C:\\_SYNC\\Work\\Оборудование\\DX-001C Lock-in Amplifier\\Experiments"
+  script: "${vars.workdir}\\cli_plot2dgif.py"
+
+actions:
+  plot2dgif:
+    title: "Create 2D GIF video"
+    form:
+      fields:
+        - id: folder
+          type: path
+          label: "Folder with camera_*.npy files"
+          default: "2025-02-06"
+          kind: dir
+        - id: out_mp4
+          type: path
+          label: "Output MP4 file"
+          default: "camera.mp4"
+          kind: file
+        - id: fps
+          type: int
+          label: "Frames per second"
+          default: 20
+          min: 1
+          max: 60
+          step: 1
+          widget: "slider"
+    pipeline:
+      - id: run_plot2dgif
+        run:
+          program: "python"
+          workdir: "${vars.workdir}"
+          argv:
+            - "${vars.script}"
+            - "--folder": "${form.folder}"
+            - "--out-mp4": "${form.out_mp4}"
+            - "--fps": "${form.fps}"
