@@ -58,6 +58,40 @@ def test_stream_output_handles_carriage_return_progress():
     assert logs == ["[stderr] 10%", "[stderr] 20%", "[stderr] done"]
 
 
+def test_python_program_detection():
+    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+
+    assert engine._looks_like_python_program("python")
+    assert engine._looks_like_python_program("python.exe")
+    assert engine._looks_like_python_program(r"C:/venv/Scripts/python.exe")
+    assert engine._looks_like_python_program("python3")
+    assert not engine._looks_like_python_program("py")
+    assert not engine._looks_like_python_program("node")
+
+
+def test_sanitize_child_env_for_embedded_tk():
+    engine = PipelineEngine({"version": 1, "actions": {"a": {"title": "A", "run": {"program": "x"}}}})
+    env = {
+        "PATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345;C:\Windows\System32",
+        "TCL_LIBRARY": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tcl_data",
+        "TK_LIBRARY": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tk_data",
+        "PYTHONHOME": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345",
+        "PYTHONPATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345",
+        "TCLLIBPATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tcl_data",
+        "SYSTEMROOT": r"C:\Windows",
+    }
+
+    sanitized = engine._sanitize_child_env_for_embedded_tk(env)
+
+    assert "TCL_LIBRARY" not in sanitized
+    assert "TK_LIBRARY" not in sanitized
+    assert "PYTHONHOME" not in sanitized
+    assert "PYTHONPATH" not in sanitized
+    assert "TCLLIBPATH" not in sanitized
+    assert "PATH" not in sanitized
+    assert sanitized["SYSTEMROOT"] == r"C:\Windows"
+
+
 
 
 def test_python_runtime_override_program_resolution():
