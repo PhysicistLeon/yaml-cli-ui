@@ -1,3 +1,5 @@
+# pylint: disable=import-error,protected-access
+
 import pytest
 
 from yaml_cli_ui.app import (
@@ -128,7 +130,7 @@ class _DummyApp:
     def _append_run_log(self, run_id, msg):
         self.logged.append((run_id, msg))
 
-    def _finish_run(self, *args):
+    def _finish_run(self, *_args):
         return None
 
     def after(self, _delay, callback, *args):
@@ -152,7 +154,10 @@ def test_collect_form_parses_supported_widget_types(monkeypatch):
             {"type": "float"},
             {"kind": "slider", "scale": 100, "control": _SliderWidget(35)},
         ),
-        "token": ({"type": "secret", "source": "env", "env": "TOKEN_ENV"}, _EntryWidget("ignored")),
+        "token": (
+            {"type": "secret", "source": "env", "env": "TOKEN_ENV"},
+            _EntryWidget("ignored"),
+        ),
         "pairs": ({"type": "kv_list"}, _TextWidget("- k: v")),
     }
 
@@ -233,8 +238,8 @@ def test_run_action_worker_schedules_success_and_failures():
     success_app = _DummyApp(_Engine({"ok": True}))
     App._run_action_worker(success_app, 1, "build", {"x": 1})
     assert len(success_app.after_calls) == 2
-    assert success_app.after_calls[0][0] == success_app._append_run_log
-    assert success_app.after_calls[1][0] == success_app._finish_run
+    assert success_app.after_calls[0][0].__name__ == "_append_run_log"
+    assert success_app.after_calls[1][0].__name__ == "_finish_run"
     assert success_app.after_calls[1][1] == (1, True, {"ok": True}, None, False)
 
     cancelled_app = _DummyApp(_Engine(ActionCancelledError("stop")))
