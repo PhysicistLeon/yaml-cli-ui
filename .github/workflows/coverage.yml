@@ -1,0 +1,77 @@
+name: Coverage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q --cov=yaml_cli_ui --cov-report=term --cov-report=xml
+
+      - name: Build coverage badge JSON from coverage.xml
+        run: |
+          python - <<'PY'
+          import json
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse('coverage.xml').getroot()
+          percent = round(float(root.attrib.get('line-rate', 0.0)) * 100)
+
+          if percent >= 90:
+            color = 'brightgreen'
+          elif percent >= 75:
+            color = 'green'
+          elif percent >= 60:
+            color = 'yellowgreen'
+          elif percent >= 40:
+            color = 'yellow'
+          elif percent >= 20:
+            color = 'orange'
+          else:
+            color = 'red'
+
+          payload = {
+            'schemaVersion': 1,
+            'label': 'coverage',
+            'message': f'{percent}%',
+            'color': color,
+          }
+
+          with open('coverage-badge.json', 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+          PY
+
+      - name: Commit coverage badge JSON
+        if: github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update coverage badge [skip ci]'
+          file_pattern: coverage-badge.json
