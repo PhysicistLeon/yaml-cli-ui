@@ -986,7 +986,9 @@ class App(tk.Tk):
 
         ttk.Label(preset_row, text="Preset:").pack(side="left")
         preset_var = tk.StringVar()
-        preset_combo = ttk.Combobox(preset_row, state="readonly", textvariable=preset_var)
+        preset_combo = ttk.Combobox(
+            preset_row, state="readonly", textvariable=preset_var
+        )
         preset_combo.pack(side="left", fill="x", expand=True, padx=(6, 8))
 
         fields_wrap = ttk.Frame(body)
@@ -1006,7 +1008,9 @@ class App(tk.Tk):
             stale_text.configure(state="disabled")
 
         saved_values = self._get_saved_form_values(action_id)
-        fields = self._create_form_fields(fields_wrap, form, initial_values=saved_values)
+        fields = self._create_form_fields(
+            fields_wrap, form, initial_values=saved_values
+        )
 
         def refresh_preset_combo() -> list[str]:
             names = self.preset_service.list_presets(action_id)
@@ -1028,9 +1032,13 @@ class App(tk.Tk):
 
             if last_run.get("mode") == "preset_ref":
                 preset_name = str(last_run.get("preset_name", ""))
-                preset_values = self.preset_service.get_preset_values(action_id, preset_name)
+                preset_values = self.preset_service.get_preset_values(
+                    action_id, preset_name
+                )
                 if preset_values is not None:
-                    mapped, unused = self._compatible_preset_values(preset_values, fields)
+                    mapped, unused = self._compatible_preset_values(
+                        preset_values, fields
+                    )
                     self._apply_values_to_form(fields, mapped)
                     selected_preset_name["name"] = preset_name
                     selected_preset_values.clear()
@@ -1061,7 +1069,9 @@ class App(tk.Tk):
                 return
             values = self.preset_service.get_preset_values(action_id, selected)
             if values is None:
-                messagebox.showerror("Preset error", "Selected preset was not found", parent=dialog)
+                messagebox.showerror(
+                    "Preset error", "Selected preset was not found", parent=dialog
+                )
                 refresh_preset_combo()
                 apply_last_run()
                 return
@@ -1079,12 +1089,16 @@ class App(tk.Tk):
         apply_last_run()
 
         def ask_preset_name(title: str, initial: str = "") -> str | None:
-            name = simpledialog.askstring("Preset", title, initialvalue=initial, parent=dialog)
+            name = simpledialog.askstring(
+                "Preset", title, initialvalue=initial, parent=dialog
+            )
             if name is None:
                 return None
             normalized = name.strip()
             if not normalized:
-                messagebox.showerror("Preset error", "Preset name must not be empty", parent=dialog)
+                messagebox.showerror(
+                    "Preset error", "Preset name must not be empty", parent=dialog
+                )
                 return None
             return normalized
 
@@ -1093,7 +1107,9 @@ class App(tk.Tk):
             if not name:
                 return
             if name in self.preset_service.list_presets(action_id):
-                messagebox.showerror("Preset error", "Preset already exists", parent=dialog)
+                messagebox.showerror(
+                    "Preset error", "Preset already exists", parent=dialog
+                )
                 return
             try:
                 data = self._collect_form(fields)
@@ -1113,7 +1129,9 @@ class App(tk.Tk):
         def on_overwrite_preset() -> None:
             current = preset_var.get().strip()
             if not current or current == "(last run)":
-                messagebox.showerror("Preset error", "Select a named preset first", parent=dialog)
+                messagebox.showerror(
+                    "Preset error", "Select a named preset first", parent=dialog
+                )
                 return
             confirm = messagebox.askyesno(
                 "Overwrite preset",
@@ -1138,7 +1156,9 @@ class App(tk.Tk):
         def on_rename_preset() -> None:
             current = preset_var.get().strip()
             if not current or current == "(last run)":
-                messagebox.showerror("Preset error", "Select a named preset first", parent=dialog)
+                messagebox.showerror(
+                    "Preset error", "Select a named preset first", parent=dialog
+                )
                 return
             new_name = ask_preset_name("New preset name", current)
             if not new_name or new_name == current:
@@ -1155,7 +1175,9 @@ class App(tk.Tk):
         def on_delete_preset() -> None:
             current = preset_var.get().strip()
             if not current or current == "(last run)":
-                messagebox.showerror("Preset error", "Select a named preset first", parent=dialog)
+                messagebox.showerror(
+                    "Preset error", "Select a named preset first", parent=dialog
+                )
                 return
             confirm = messagebox.askyesno(
                 "Delete preset",
@@ -1180,7 +1202,9 @@ class App(tk.Tk):
 
         preset_actions = ttk.Frame(presets_section)
         preset_actions.pack(fill="x", padx=8, pady=(0, 6))
-        ttk.Button(preset_actions, text="Create", command=on_create_preset).pack(side="left")
+        ttk.Button(preset_actions, text="Create", command=on_create_preset).pack(
+            side="left"
+        )
         ttk.Button(preset_actions, text="Overwrite", command=on_overwrite_preset).pack(
             side="left", padx=(6, 0)
         )
@@ -1206,7 +1230,9 @@ class App(tk.Tk):
             selected_name = selected_preset_name["name"]
             if selected_name and persisted == selected_preset_values:
                 try:
-                    self.preset_service.save_last_run_preset_ref(action_id, selected_name)
+                    self.preset_service.save_last_run_preset_ref(
+                        action_id, selected_name
+                    )
                 except OSError:
                     pass
             else:

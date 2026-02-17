@@ -251,8 +251,6 @@ def test_slider_entry_commit_syncs_fallback_and_scaled_value():
     assert sync_calls == [12, 19]
 
 
-
-
 def test_set_field_value_uses_set_for_choice_widgets():
     class _ComboWidget:
         def __init__(self):
@@ -278,6 +276,7 @@ def test_set_field_value_uses_set_for_choice_widgets():
     assert tri_widget.set_calls == ["true"]
     assert not choice_widget.insert_calls
     assert not tri_widget.insert_calls
+
 
 def test_run_action_worker_schedules_success_and_failures():
     class _Engine:

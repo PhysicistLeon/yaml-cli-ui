@@ -71,7 +71,9 @@ class PresetService:
             return []
         return sorted([name for name in presets.keys() if isinstance(name, str)])
 
-    def get_preset_values(self, action_id: str, preset_name: str) -> dict[str, Any] | None:
+    def get_preset_values(
+        self, action_id: str, preset_name: str
+    ) -> dict[str, Any] | None:
         action_state = self._action_state(action_id)
         presets = action_state.get("presets", {})
         if not isinstance(presets, dict):
@@ -89,7 +91,9 @@ class PresetService:
             return {}
         return dict(last_run)
 
-    def save_preset(self, action_id: str, preset_name: str, values: dict[str, Any]) -> None:
+    def save_preset(
+        self, action_id: str, preset_name: str, values: dict[str, Any]
+    ) -> None:
         if not preset_name.strip():
             raise PresetError("Preset name must not be empty")
         action_state = self._action_state(action_id)

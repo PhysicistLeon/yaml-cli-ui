@@ -54,13 +54,14 @@ def test_delete_non_referenced_preset_keeps_last_run(tmp_path):
     was_cleared = service.delete_preset("build", "regression")
 
     assert was_cleared is False
-    assert service.get_last_run("build") == {"mode": "preset_ref", "preset_name": "smoke"}
+    assert service.get_last_run("build") == {
+        "mode": "preset_ref",
+        "preset_name": "smoke",
+    }
 
 
 def test_map_values_to_form_returns_unused_values():
-    mapped, unused = PresetService.map_values_to_form(
-        {"a": 1, "old": 2}, {"a", "b"}
-    )
+    mapped, unused = PresetService.map_values_to_form({"a": 1, "old": 2}, {"a", "b"})
 
     assert mapped == {"a": 1}
     assert unused == {"old": 2}
