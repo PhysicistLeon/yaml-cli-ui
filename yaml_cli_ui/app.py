@@ -999,7 +999,7 @@ class App(tk.Tk):
             stale_text.configure(state="disabled")
 
         saved_values = self._get_saved_form_values(action_id)
-        fields = self._create_form_fields(body=fields_wrap, form=form, initial_values=saved_values)
+        fields = self._create_form_fields(fields_wrap, form, initial_values=saved_values)
 
         def refresh_preset_combo() -> list[str]:
             names = self.preset_service.list_presets(action_id)
