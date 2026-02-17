@@ -251,6 +251,34 @@ def test_slider_entry_commit_syncs_fallback_and_scaled_value():
     assert sync_calls == [12, 19]
 
 
+
+
+def test_set_field_value_uses_set_for_choice_widgets():
+    class _ComboWidget:
+        def __init__(self):
+            self.set_calls = []
+            self.insert_calls = []
+
+        def set(self, value):
+            self.set_calls.append(value)
+
+        def delete(self, *_args):
+            return None
+
+        def insert(self, *_args):
+            self.insert_calls.append(_args)
+
+    choice_widget = _ComboWidget()
+    tri_widget = _ComboWidget()
+
+    App._set_field_value(object(), {"type": "choice"}, choice_widget, "fast")
+    App._set_field_value(object(), {"type": "tri_bool"}, tri_widget, "true")
+
+    assert choice_widget.set_calls == ["fast"]
+    assert tri_widget.set_calls == ["true"]
+    assert choice_widget.insert_calls == []
+    assert tri_widget.insert_calls == []
+
 def test_run_action_worker_schedules_success_and_failures():
     class _Engine:
         def __init__(self, outcome):

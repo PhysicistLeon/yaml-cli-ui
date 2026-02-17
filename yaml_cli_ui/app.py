@@ -839,6 +839,12 @@ class App(tk.Tk):
             widget.var.set(bool(value))
             return
 
+        if ftype in {"tri_bool", "choice"}:
+            if value == "":
+                value = "auto" if ftype == "tri_bool" else ""
+            widget.set(str(value))
+            return
+
         if ftype == "multichoice":
             widget.selection_clear(0, "end")
             selected = set(value) if isinstance(value, list) else set()
