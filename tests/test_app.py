@@ -72,6 +72,33 @@ def test_load_ui_state_ignores_invalid_json(tmp_path):
     assert load_ui_state(state_path) == {}
 
 
+def test_persisted_form_values_excludes_secret_fields():
+    data = {"name": "demo", "token": "secret", "count": 1}
+    fields = {
+        "name": ({"type": "string"}, _EntryWidget("")),
+        "token": ({"type": "secret"}, _EntryWidget("")),
+        "count": ({"type": "int"}, _EntryWidget("")),
+    }
+
+    persisted = App._persisted_form_values(data, fields)
+
+    assert persisted == {"name": "demo", "count": 1}
+
+
+def test_compatible_preset_values_extracts_unused_fields():
+    fields = {
+        "name": ({"type": "string"}, _EntryWidget("")),
+        "count": ({"type": "int"}, _EntryWidget("")),
+    }
+
+    mapped, unused = App._compatible_preset_values(
+        {"name": "demo", "old_param": 42}, fields
+    )
+
+    assert mapped == {"name": "demo"}
+    assert unused == {"old_param": 42}
+
+
 class _EntryWidget:
     def __init__(self, value):
         self.value = value

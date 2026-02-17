@@ -19,6 +19,9 @@ python main.py --settings app.ini
 - Top-level actions rendered as quick-launch buttons (no action dropdown).
 - Action parameters are entered in a modal dialog per run.
 - Last entered action parameters are remembered between app restarts (per YAML config and action, excluding `secret` fields) and prefilled on next run.
+- Named presets per action (create/overwrite/rename/delete) stored next to YAML in `<yaml>.presets.json`.
+- Last run behavior supports snapshot or reference to the last launched named preset.
+- Preset compatibility warnings show unused parameters when YAML form fields changed.
 - Parallel action runs with status colors: idle=neutral, running=yellow, success=green, failed=red.
 - Output notebook with aggregate `All runs` stream plus per-action tabs.
 - Per-action run history selector to inspect past outputs.
