@@ -34,6 +34,17 @@ python main.py --settings app.ini
 - YAML reload button in UI.
 
 
+
+## on_error demo
+
+A minimal runnable demo for the new recovery behavior is included:
+
+```bash
+python main.py examples/on_error_demo.yaml
+```
+
+This action intentionally fails, then runs `on_error` cleanup and passes `${error.*}` context to cleanup script.
+
 ## Runtime aliases
 
 You can define runtime-level executable overrides, for example for Python:

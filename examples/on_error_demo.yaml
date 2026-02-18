@@ -1,0 +1,42 @@
+version: 1
+
+app:
+  title: "on_error / catch demo"
+  shell: false
+
+actions:
+  fail_with_cleanup:
+    title: "Fail and recover (on_error)"
+    form:
+      fields:
+        - id: tmp_file
+          type: path
+          label: "Temporary file path"
+          default: "examples/demo.tmp"
+          kind: file
+    pipeline:
+      - id: create_and_fail
+        run:
+          program: python
+          argv:
+            - "examples/on_error_demo.py"
+            - "--mode"
+            - "fail"
+            - "--tmp-file"
+            - "${form.tmp_file}"
+    on_error:
+      - id: cleanup
+        run:
+          program: python
+          argv:
+            - "examples/on_error_demo.py"
+            - "--mode"
+            - "cleanup"
+            - "--tmp-file"
+            - "${form.tmp_file}"
+            - "--failed-step"
+            - "${error.step_id}"
+            - "--error-type"
+            - "${error.type}"
+            - "--error-message"
+            - "${error.message}"
