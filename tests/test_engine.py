@@ -1,10 +1,10 @@
-# pylint: disable=protected-access
+# pylint: disable=protected-access,import-error
 import io
-
-import pytest
 import sys
 import threading
 import time
+
+import pytest
 
 from yaml_cli_ui.engine import (
     ActionCancelledError,
