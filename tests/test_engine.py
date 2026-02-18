@@ -1,11 +1,15 @@
 # pylint: disable=protected-access
 import io
+
+import pytest
 import sys
 import threading
 import time
 
 from yaml_cli_ui.engine import (
     ActionCancelledError,
+    ActionRecoveryError,
+    EngineError,
     PipelineEngine,
     SafeEvaluator,
     render_template,
@@ -228,3 +232,215 @@ def test_stop_action_cancels_process_group_and_returns_quickly():
     assert errors
     assert isinstance(errors[0], ActionCancelledError)
     assert elapsed < 2
+
+
+def test_on_error_recovery_writes_recovery_namespace_and_meta():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "job": {
+                    "title": "Job",
+                    "pipeline": [
+                        {
+                            "id": "main",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": ["-c", "import sys; sys.exit(2)"],
+                            },
+                        }
+                    ],
+                    "on_error": [
+                        {
+                            "id": "cleanup",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": [
+                                    "-c",
+                                    "import sys; print(sys.argv[1], sys.argv[2]); sys.exit(0)",
+                                    "${error.step_id}",
+                                    "${error.exit_code}",
+                                ],
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    result = engine.run_action("job", {}, lambda _msg: None)
+
+    assert result["_meta"]["status"] == "recovered"
+    assert result["_meta"]["error"]["step_id"] == "main"
+    assert result["main"]["exit_code"] == 2
+    assert result["_recovery.cleanup"]["exit_code"] == 0
+
+
+def test_on_error_failure_raises_combined_error_message():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "job": {
+                    "title": "Job",
+                    "pipeline": [
+                        {
+                            "id": "main",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": ["-c", "import sys; sys.exit(5)"],
+                            },
+                        }
+                    ],
+                    "on_error": [
+                        {
+                            "id": "cleanup",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": ["-c", "import sys; sys.exit(7)"],
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    with pytest.raises(ActionRecoveryError) as exc:
+        engine.run_action("job", {}, lambda _msg: None)
+
+    msg = str(exc.value)
+    assert "Primary error:" in msg
+    assert "Recovery error:" in msg
+    assert "step_id: main" in msg
+    assert "step_id: _recovery.cleanup" in msg
+
+
+def test_template_error_uses_target_step_id_for_on_error_context():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "job": {
+                    "title": "Job",
+                    "pipeline": [
+                        {
+                            "id": "first",
+                            "run": {
+                                "program": "${missing.var}",
+                                "argv": [],
+                            },
+                        }
+                    ],
+                    "on_error": [
+                        {
+                            "id": "cleanup",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": [
+                                    "-c",
+                                    "import sys; sys.exit(0 if sys.argv[1] == 'first' else 1)",
+                                    "${error.step_id}",
+                                ],
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    result = engine.run_action("job", {}, lambda _msg: None)
+
+    assert result["_meta"]["status"] == "recovered"
+    assert result["_meta"]["error"]["step_id"] == "first"
+
+
+def test_cancelled_action_runs_on_error_and_marks_recovered():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "job": {
+                    "title": "Job",
+                    "pipeline": [
+                        {
+                            "id": "slow",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": ["-c", "import time; time.sleep(5)"],
+                            },
+                        }
+                    ],
+                    "on_error": [
+                        {
+                            "id": "cleanup",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": ["-c", "import sys; sys.exit(0)"],
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    results_holder = []
+
+    def _runner() -> None:
+        results_holder.append(engine.run_action("job", {}, lambda _msg: None))
+
+    worker = threading.Thread(target=_runner, daemon=True)
+    worker.start()
+    time.sleep(0.3)
+    engine.stop_action("job")
+    worker.join(timeout=4)
+
+    assert not worker.is_alive()
+    assert results_holder
+    assert results_holder[0]["_meta"]["status"] == "recovered"
+
+
+def test_validate_config_accepts_optional_on_error_list():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "ok": {
+                    "title": "Ok",
+                    "run": {"program": sys.executable, "argv": ["-c", "print(1)"]},
+                    "on_error": [],
+                }
+            },
+        }
+    )
+
+    result = engine.run_action("ok", {}, lambda _msg: None)
+    assert result["_meta"]["status"] == "success"
+
+
+def test_action_without_on_error_still_raises_engine_error():
+    engine = PipelineEngine(
+        {
+            "version": 1,
+            "actions": {
+                "job": {
+                    "title": "Job",
+                    "pipeline": [
+                        {
+                            "id": "main",
+                            "run": {
+                                "program": sys.executable,
+                                "argv": ["-c", "import sys; sys.exit(3)"],
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    with pytest.raises(EngineError):
+        engine.run_action("job", {}, lambda _msg: None)
