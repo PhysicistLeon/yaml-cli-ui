@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import argparse
@@ -5,17 +6,19 @@ import configparser
 import json
 import os
 import threading
+from copy import deepcopy
 from functools import partial
 from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
 import yaml
 
 from .engine import ActionCancelledError, EngineError, PipelineEngine, validate_config
+from .presets import PresetError, PresetService
 
 
 IDLE_COLOR = "#d9d9d9"
@@ -178,6 +181,7 @@ class App(tk.Tk):
         self.action_buttons: dict[str, tk.Button] = {}
         self.action_running_counts: dict[str, int] = {}
         self.ui_state = load_ui_state()
+        self.preset_service = PresetService(self.config_path)
 
         top = ttk.Frame(self)
         top.pack(fill="x", padx=10, pady=8)
@@ -439,6 +443,7 @@ class App(tk.Tk):
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
+            self.preset_service = PresetService(self.config_path)
             self.app_config = yaml.safe_load(
                 self.config_path.read_text(encoding="utf-8")
             )
@@ -792,6 +797,83 @@ class App(tk.Tk):
             raise EngineError("\n".join(errors))
         return data
 
+    @staticmethod
+    def _persisted_form_values(
+        data: dict[str, Any], fields: dict[str, tuple[dict[str, Any], Any]]
+    ) -> dict[str, Any]:
+        return {
+            fid: value
+            for fid, value in data.items()
+            if fields[fid][0].get("type") != "secret"
+        }
+
+    @staticmethod
+    def _compatible_preset_values(
+        values: dict[str, Any], fields: dict[str, tuple[dict[str, Any], Any]]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        return PresetService.map_values_to_form(values, set(fields.keys()))
+
+    @staticmethod
+    def _unused_values_text(unused_values: dict[str, Any]) -> str:
+        return json.dumps(unused_values, ensure_ascii=False, indent=2)
+
+    def _set_field_value(self, field: dict[str, Any], widget: Any, value: Any) -> None:
+        ftype = field.get("type", "string")
+
+        if value is None:
+            value = ""
+
+        if isinstance(widget, dict) and widget.get("kind") == "slider":
+            scale = widget["scale"]
+            control = widget["control"]
+            numeric = float(value) if value != "" else 0
+            control.set(int(round(numeric * scale)))
+            return
+
+        if ftype == "text":
+            widget.delete("1.0", "end")
+            if value != "":
+                widget.insert("1.0", str(value))
+            return
+
+        if ftype == "bool":
+            widget.var.set(bool(value))
+            return
+
+        if ftype in {"tri_bool", "choice"}:
+            if value == "":
+                value = "auto" if ftype == "tri_bool" else ""
+            widget.set(str(value))
+            return
+
+        if ftype == "multichoice":
+            widget.selection_clear(0, "end")
+            selected = set(value) if isinstance(value, list) else set()
+            for idx in range(widget.size()):
+                if widget.get(idx) in selected:
+                    widget.selection_set(idx)
+            return
+
+        if ftype in {"kv_list", "struct_list"}:
+            widget.delete("1.0", "end")
+            if value != "":
+                widget.insert("1.0", json.dumps(value, ensure_ascii=False, indent=2))
+            return
+
+        if hasattr(widget, "delete"):
+            widget.delete(0, "end")
+        if value != "":
+            widget.insert(0, str(value))
+
+    def _apply_values_to_form(
+        self,
+        fields: dict[str, tuple[dict[str, Any], Any]],
+        values: dict[str, Any],
+    ) -> None:
+        for fid, (field, widget) in fields.items():
+            target_value = values.get(fid, field.get("default"))
+            self._set_field_value(field, widget, target_value)
+
     def _run_action_worker(
         self, run_id: int, action_id: str, form: dict[str, Any]
     ) -> None:
@@ -896,8 +978,242 @@ class App(tk.Tk):
         body = ttk.Frame(dialog)
         body.pack(fill="both", expand=True, padx=10, pady=10)
 
+        presets_section = ttk.LabelFrame(body, text="Presets")
+        presets_section.pack(fill="x", pady=(0, 8))
+
+        preset_row = ttk.Frame(presets_section)
+        preset_row.pack(fill="x", padx=8, pady=6)
+
+        ttk.Label(preset_row, text="Preset:").pack(side="left")
+        preset_var = tk.StringVar()
+        preset_combo = ttk.Combobox(
+            preset_row, state="readonly", textvariable=preset_var
+        )
+        preset_combo.pack(side="left", fill="x", expand=True, padx=(6, 8))
+
+        fields_wrap = ttk.Frame(body)
+        fields_wrap.pack(fill="both", expand=True)
+
+        stale_section = ttk.LabelFrame(body, text="Неиспользованные параметры пресета")
+        stale_section.pack(fill="x", pady=(8, 0))
+        stale_text = tk.Text(stale_section, height=5)
+        stale_text.pack(fill="x", padx=6, pady=6)
+        stale_text.configure(state="disabled")
+
+        def set_stale_warning(unused_values: dict[str, Any]) -> None:
+            stale_text.configure(state="normal")
+            stale_text.delete("1.0", "end")
+            if unused_values:
+                stale_text.insert("1.0", self._unused_values_text(unused_values))
+            stale_text.configure(state="disabled")
+
         saved_values = self._get_saved_form_values(action_id)
-        fields = self._create_form_fields(body, form, initial_values=saved_values)
+        fields = self._create_form_fields(
+            fields_wrap, form, initial_values=saved_values
+        )
+
+        def refresh_preset_combo() -> list[str]:
+            names = self.preset_service.list_presets(action_id)
+            preset_combo["values"] = ["(last run)", *names]
+            return names
+
+        selected_preset_name: dict[str, str | None] = {"name": None}
+        selected_preset_values: dict[str, Any] = {}
+
+        def apply_last_run() -> None:
+            last_run = self.preset_service.get_last_run(action_id)
+            if not last_run and saved_values:
+                self._apply_values_to_form(fields, saved_values)
+                preset_var.set("(last run)")
+                selected_preset_name["name"] = None
+                selected_preset_values.clear()
+                set_stale_warning({})
+                return
+
+            if last_run.get("mode") == "preset_ref":
+                preset_name = str(last_run.get("preset_name", ""))
+                preset_values = self.preset_service.get_preset_values(
+                    action_id, preset_name
+                )
+                if preset_values is not None:
+                    mapped, unused = self._compatible_preset_values(
+                        preset_values, fields
+                    )
+                    self._apply_values_to_form(fields, mapped)
+                    selected_preset_name["name"] = preset_name
+                    selected_preset_values.clear()
+                    selected_preset_values.update(deepcopy(mapped))
+                    preset_var.set(preset_name)
+                    set_stale_warning(unused)
+                    return
+                messagebox.showwarning(
+                    "Preset missing",
+                    "Last run referenced preset was not found. The form was reset.",
+                    parent=dialog,
+                )
+
+            snapshot = last_run.get("values", {}) if isinstance(last_run, dict) else {}
+            if not isinstance(snapshot, dict):
+                snapshot = {}
+            mapped, _unused = self._compatible_preset_values(snapshot, fields)
+            self._apply_values_to_form(fields, mapped)
+            preset_var.set("(last run)")
+            selected_preset_name["name"] = None
+            selected_preset_values.clear()
+            set_stale_warning({})
+
+        def on_preset_selected(_event: tk.Event[Any] | None = None) -> None:
+            selected = preset_var.get().strip()
+            if selected == "(last run)" or not selected:
+                apply_last_run()
+                return
+            values = self.preset_service.get_preset_values(action_id, selected)
+            if values is None:
+                messagebox.showerror(
+                    "Preset error", "Selected preset was not found", parent=dialog
+                )
+                refresh_preset_combo()
+                apply_last_run()
+                return
+            mapped, unused = self._compatible_preset_values(values, fields)
+            self._apply_values_to_form(fields, mapped)
+            selected_preset_name["name"] = selected
+            selected_preset_values.clear()
+            selected_preset_values.update(deepcopy(mapped))
+            set_stale_warning(unused)
+
+        preset_names = refresh_preset_combo()
+        preset_combo.bind("<<ComboboxSelected>>", on_preset_selected)
+        if preset_names:
+            preset_var.set("(last run)")
+        apply_last_run()
+
+        def ask_preset_name(title: str, initial: str = "") -> str | None:
+            name = simpledialog.askstring(
+                "Preset", title, initialvalue=initial, parent=dialog
+            )
+            if name is None:
+                return None
+            normalized = name.strip()
+            if not normalized:
+                messagebox.showerror(
+                    "Preset error", "Preset name must not be empty", parent=dialog
+                )
+                return None
+            return normalized
+
+        def on_create_preset() -> None:
+            name = ask_preset_name("Preset name")
+            if not name:
+                return
+            if name in self.preset_service.list_presets(action_id):
+                messagebox.showerror(
+                    "Preset error", "Preset already exists", parent=dialog
+                )
+                return
+            try:
+                data = self._collect_form(fields)
+            except EngineError as exc:
+                messagebox.showerror("Execution error", str(exc), parent=dialog)
+                return
+            persisted = self._persisted_form_values(data, fields)
+            try:
+                self.preset_service.save_preset(action_id, name, persisted)
+            except (PresetError, OSError) as exc:
+                messagebox.showerror("Preset error", str(exc), parent=dialog)
+                return
+            refresh_preset_combo()
+            preset_var.set(name)
+            on_preset_selected()
+
+        def on_overwrite_preset() -> None:
+            current = preset_var.get().strip()
+            if not current or current == "(last run)":
+                messagebox.showerror(
+                    "Preset error", "Select a named preset first", parent=dialog
+                )
+                return
+            confirm = messagebox.askyesno(
+                "Overwrite preset",
+                f"Overwrite preset '{current}' with current form values?",
+                parent=dialog,
+            )
+            if not confirm:
+                return
+            try:
+                data = self._collect_form(fields)
+            except EngineError as exc:
+                messagebox.showerror("Execution error", str(exc), parent=dialog)
+                return
+            persisted = self._persisted_form_values(data, fields)
+            try:
+                self.preset_service.save_preset(action_id, current, persisted)
+            except (PresetError, OSError) as exc:
+                messagebox.showerror("Preset error", str(exc), parent=dialog)
+                return
+            on_preset_selected()
+
+        def on_rename_preset() -> None:
+            current = preset_var.get().strip()
+            if not current or current == "(last run)":
+                messagebox.showerror(
+                    "Preset error", "Select a named preset first", parent=dialog
+                )
+                return
+            new_name = ask_preset_name("New preset name", current)
+            if not new_name or new_name == current:
+                return
+            try:
+                self.preset_service.rename_preset(action_id, current, new_name)
+            except (PresetError, OSError) as exc:
+                messagebox.showerror("Preset error", str(exc), parent=dialog)
+                return
+            refresh_preset_combo()
+            preset_var.set(new_name)
+            on_preset_selected()
+
+        def on_delete_preset() -> None:
+            current = preset_var.get().strip()
+            if not current or current == "(last run)":
+                messagebox.showerror(
+                    "Preset error", "Select a named preset first", parent=dialog
+                )
+                return
+            confirm = messagebox.askyesno(
+                "Delete preset",
+                f"Delete preset '{current}'?",
+                parent=dialog,
+            )
+            if not confirm:
+                return
+            try:
+                last_ref_cleared = self.preset_service.delete_preset(action_id, current)
+            except OSError as exc:
+                messagebox.showerror("Preset error", str(exc), parent=dialog)
+                return
+            if last_ref_cleared:
+                messagebox.showwarning(
+                    "Last run reference cleared",
+                    "Deleted preset was referenced by last run. Reference was cleared and the form reset.",
+                    parent=dialog,
+                )
+            refresh_preset_combo()
+            apply_last_run()
+
+        preset_actions = ttk.Frame(presets_section)
+        preset_actions.pack(fill="x", padx=8, pady=(0, 6))
+        ttk.Button(preset_actions, text="Create", command=on_create_preset).pack(
+            side="left"
+        )
+        ttk.Button(preset_actions, text="Overwrite", command=on_overwrite_preset).pack(
+            side="left", padx=(6, 0)
+        )
+        ttk.Button(preset_actions, text="Rename", command=on_rename_preset).pack(
+            side="left", padx=(6, 0)
+        )
+        ttk.Button(preset_actions, text="Delete", command=on_delete_preset).pack(
+            side="left", padx=(6, 0)
+        )
 
         actions = ttk.Frame(dialog)
         actions.pack(fill="x", padx=10, pady=(0, 10))
@@ -908,12 +1224,22 @@ class App(tk.Tk):
             except EngineError as exc:
                 messagebox.showerror("Execution error", str(exc), parent=dialog)
                 return
-            persisted = {
-                fid: value
-                for fid, value in data.items()
-                if fields[fid][0].get("type") != "secret"
-            }
+            persisted = self._persisted_form_values(data, fields)
             self._save_form_values(action_id, persisted)
+
+            selected_name = selected_preset_name["name"]
+            if selected_name and persisted == selected_preset_values:
+                try:
+                    self.preset_service.save_last_run_preset_ref(
+                        action_id, selected_name
+                    )
+                except OSError:
+                    pass
+            else:
+                try:
+                    self.preset_service.save_last_run_snapshot(action_id, persisted)
+                except OSError:
+                    pass
             dialog.destroy()
             self._start_action(action_id, data)
 

@@ -72,6 +72,33 @@ def test_load_ui_state_ignores_invalid_json(tmp_path):
     assert load_ui_state(state_path) == {}
 
 
+def test_persisted_form_values_excludes_secret_fields():
+    data = {"name": "demo", "token": "secret", "count": 1}
+    fields = {
+        "name": ({"type": "string"}, _EntryWidget("")),
+        "token": ({"type": "secret"}, _EntryWidget("")),
+        "count": ({"type": "int"}, _EntryWidget("")),
+    }
+
+    persisted = App._persisted_form_values(data, fields)
+
+    assert persisted == {"name": "demo", "count": 1}
+
+
+def test_compatible_preset_values_extracts_unused_fields():
+    fields = {
+        "name": ({"type": "string"}, _EntryWidget("")),
+        "count": ({"type": "int"}, _EntryWidget("")),
+    }
+
+    mapped, unused = App._compatible_preset_values(
+        {"name": "demo", "old_param": 42}, fields
+    )
+
+    assert mapped == {"name": "demo"}
+    assert unused == {"old_param": 42}
+
+
 class _EntryWidget:
     def __init__(self, value):
         self.value = value
@@ -222,6 +249,33 @@ def test_slider_entry_commit_syncs_fallback_and_scaled_value():
     )
 
     assert sync_calls == [12, 19]
+
+
+def test_set_field_value_uses_set_for_choice_widgets():
+    class _ComboWidget:
+        def __init__(self):
+            self.set_calls = []
+            self.insert_calls = []
+
+        def set(self, value):
+            self.set_calls.append(value)
+
+        def delete(self, *_args):
+            return None
+
+        def insert(self, *_args):
+            self.insert_calls.append(_args)
+
+    choice_widget = _ComboWidget()
+    tri_widget = _ComboWidget()
+
+    App._set_field_value(object(), {"type": "choice"}, choice_widget, "fast")
+    App._set_field_value(object(), {"type": "tri_bool"}, tri_widget, "true")
+
+    assert choice_widget.set_calls == ["fast"]
+    assert tri_widget.set_calls == ["true"]
+    assert not choice_widget.insert_calls
+    assert not tri_widget.insert_calls
 
 
 def test_run_action_worker_schedules_success_and_failures():
