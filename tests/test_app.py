@@ -4,6 +4,7 @@ import pytest
 
 from yaml_cli_ui.app import (
     ActionCancelledError,
+    ActionRecoveryError,
     App,
     EngineError,
     HELP_CONTENT,
@@ -294,15 +295,15 @@ def test_run_action_worker_schedules_success_and_failures():
     assert len(success_app.after_calls) == 2
     assert success_app.after_calls[0][0].__name__ == "_append_run_log"
     assert success_app.after_calls[1][0].__name__ == "_finish_run"
-    assert success_app.after_calls[1][1] == (1, True, {"ok": True}, None, False)
+    assert success_app.after_calls[1][1] == (1, "success", {"ok": True}, None, False)
 
     cancelled_app = _DummyApp(_Engine(ActionCancelledError("stop")))
     App._run_action_worker(cancelled_app, 2, "build", {})
-    assert cancelled_app.after_calls[-1][1] == (2, False, None, "stop", True)
+    assert cancelled_app.after_calls[-1][1] == (2, "failed", None, "stop", True)
 
     failed_app = _DummyApp(_Engine(ValueError("boom")))
     App._run_action_worker(failed_app, 3, "build", {})
-    assert failed_app.after_calls[-1][1] == (3, False, None, "boom", False)
+    assert failed_app.after_calls[-1][1] == (3, "failed", None, "boom", False)
 
 
 def test_has_editable_fields_ignores_env_secrets():
@@ -331,3 +332,23 @@ def test_has_editable_fields_ignores_env_secrets():
         )
         is True
     )
+
+
+def test_result_status_detects_recovered_meta():
+    assert App._result_status({"_meta": {"status": "recovered"}}) == "recovered"
+    assert App._result_status({"_meta": {"status": "success"}}) == "success"
+    assert App._result_status({}) == "success"
+
+
+def test_run_action_worker_handles_action_recovery_error():
+    class _Engine:
+        def run_action(self, _action_id, _form, _logger):
+            raise ActionRecoveryError(
+                type("P", (), {"error_type": "Primary", "step_id": "a", "exit_code": 1, "message": "x"})(),
+                type("R", (), {"error_type": "Recovery", "step_id": "b", "exit_code": 2, "message": "y"})(),
+            )
+
+    app = _DummyApp(_Engine())
+    App._run_action_worker(app, 7, "build", {})
+    assert app.after_calls[-1][1][0] == 7
+    assert app.after_calls[-1][1][1] == "failed"

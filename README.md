@@ -28,9 +28,22 @@ python main.py --settings app.ini
 - Supported steps: `run`, nested `pipeline`, `foreach`.
 - Safe expression evaluator for `${...}` templates.
 - Deterministic argv serialization (string/short-map/extended-option forms).
-- Step result storage (`exit_code/stdout/stderr/duration_ms`).
+- Step result storage (`exit_code/stdout/stderr/duration_ms`) with recovery namespace keys (`_recovery.<step_id>`).
+- Optional `on_error` action block with `${error.*}` context (`step_id`, `exit_code`, `message`, `type`).
+- Recovered action status is shown in orange (`recovered`).
 - YAML reload button in UI.
 
+
+
+## on_error demo
+
+A minimal runnable demo for the new recovery behavior is included:
+
+```bash
+python main.py examples/on_error_demo.yaml
+```
+
+This action intentionally fails, then runs `on_error` cleanup and passes `${error.*}` context to cleanup script.
 
 ## Runtime aliases
 

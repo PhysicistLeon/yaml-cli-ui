@@ -17,7 +17,13 @@ from typing import Any
 
 import yaml
 
-from .engine import ActionCancelledError, EngineError, PipelineEngine, validate_config
+from .engine import (
+    ActionCancelledError,
+    ActionRecoveryError,
+    EngineError,
+    PipelineEngine,
+    validate_config,
+)
 from .presets import PresetError, PresetService
 
 
@@ -25,6 +31,7 @@ IDLE_COLOR = "#d9d9d9"
 RUNNING_COLOR = "#f1c40f"
 SUCCESS_COLOR = "#2ecc71"
 FAILED_COLOR = "#e74c3c"
+RECOVERED_COLOR = "#f39c12"
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 STATE_FILE_PATH = Path.home() / ".yaml_cli_ui" / "state.json"
 
@@ -367,6 +374,7 @@ class App(tk.Tk):
             "idle": IDLE_COLOR,
             "running": RUNNING_COLOR,
             "success": SUCCESS_COLOR,
+            "recovered": RECOVERED_COLOR,
             "failed": FAILED_COLOR,
         }.get(status, IDLE_COLOR)
         btn = self.action_buttons.get(action_id)
@@ -874,6 +882,15 @@ class App(tk.Tk):
             target_value = values.get(fid, field.get("default"))
             self._set_field_value(field, widget, target_value)
 
+    @staticmethod
+    def _result_status(results: dict[str, Any] | None) -> str:
+        if not isinstance(results, dict):
+            return "success"
+        meta = results.get("_meta", {})
+        if not isinstance(meta, dict):
+            return "success"
+        return str(meta.get("status", "success"))
+
     def _run_action_worker(
         self, run_id: int, action_id: str, form: dict[str, Any]
     ) -> None:
@@ -884,16 +901,19 @@ class App(tk.Tk):
 
         try:
             results = self.engine.run_action(action_id, form, logger)
-            self.after(0, self._finish_run, run_id, True, results, None, False)
+            status = App._result_status(results)
+            self.after(0, self._finish_run, run_id, status, results, None, False)
+        except ActionRecoveryError as exc:
+            self.after(0, self._finish_run, run_id, "failed", None, str(exc), False)
         except ActionCancelledError as exc:
-            self.after(0, self._finish_run, run_id, False, None, str(exc), True)
+            self.after(0, self._finish_run, run_id, "failed", None, str(exc), True)
         except (EngineError, OSError, ValueError, TypeError) as exc:
-            self.after(0, self._finish_run, run_id, False, None, str(exc), False)
+            self.after(0, self._finish_run, run_id, "failed", None, str(exc), False)
 
     def _finish_run(
         self,
         run_id: int,
-        success: bool,
+        status: str,
         results: dict[str, Any] | None,
         error: str | None,
         cancelled: bool,
@@ -901,10 +921,13 @@ class App(tk.Tk):
         run = self.run_records[run_id]
         action_id = run["action"]
 
-        if success:
-            run["status"] = "done"
+        if status in {"success", "recovered"}:
+            run["status"] = status
             run["result"] = results
-            self._append_run_log(run_id, "Done")
+            if status == "recovered":
+                self._append_run_log(run_id, "Recovered")
+            else:
+                self._append_run_log(run_id, "Done")
             self._append_run_log(
                 run_id, json.dumps(results, ensure_ascii=False, indent=2)
             )
@@ -921,7 +944,12 @@ class App(tk.Tk):
         if self.action_running_counts[action_id] > 0:
             self._set_action_status(action_id, "running")
         else:
-            self._set_action_status(action_id, "success" if success else "failed")
+            final_status = "failed"
+            if status == "success":
+                final_status = "success"
+            elif status == "recovered":
+                final_status = "recovered"
+            self._set_action_status(action_id, final_status)
 
         self._refresh_action_history(action_id)
         self._on_history_selected(action_id)

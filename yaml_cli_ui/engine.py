@@ -26,6 +26,39 @@ class ActionCancelledError(EngineError):
     pass
 
 
+class ActionRecoveryError(EngineError):
+    def __init__(
+        self,
+        primary_error: "ExecutionFailure",
+        recovery_error: "ExecutionFailure",
+    ):
+        self.primary_error = primary_error
+        self.recovery_error = recovery_error
+        super().__init__(self._build_message())
+
+    def _build_message(self) -> str:
+        return (
+            "Primary error:\n"
+            f"  type: {self.primary_error.error_type}\n"
+            f"  step_id: {self.primary_error.step_id}\n"
+            f"  exit_code: {self.primary_error.exit_code}\n"
+            f"  message: {self.primary_error.message}\n\n"
+            "Recovery error:\n"
+            f"  type: {self.recovery_error.error_type}\n"
+            f"  step_id: {self.recovery_error.step_id}\n"
+            f"  exit_code: {self.recovery_error.exit_code}\n"
+            f"  message: {self.recovery_error.message}"
+        )
+
+
+
+
+class PipelineStepError(EngineError):
+    def __init__(self, failure: "ExecutionFailure", step_index: int):
+        self.failure = failure
+        self.step_index = step_index
+        super().__init__(failure.message)
+
 class DotDict:
     def __init__(self, data: dict[str, Any]):
         self._data = data
@@ -143,6 +176,22 @@ class StepResult:
     duration_ms: int
 
 
+@dataclass
+class ExecutionFailure:
+    step_id: str
+    message: str
+    error_type: str
+    exit_code: int | None = None
+
+    def to_context(self) -> dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "message": self.message,
+            "type": self.error_type,
+            "exit_code": self.exit_code,
+        }
+
+
 class PipelineEngine:
     def __init__(self, config: dict[str, Any]):
         self.config = config
@@ -228,7 +277,7 @@ class PipelineEngine:
             "exists": lambda p: Path(str(p)).exists(),
         }
         if extra:
-            ctx.update(extra)
+            ctx.update({k: to_dotdict(v) for k, v in extra.items()})
         evalr = SafeEvaluator(ctx)
 
         for key, val in list(resolved_vars.items()):
@@ -348,6 +397,25 @@ class PipelineEngine:
             return str(render_template(python_executable, evaluator))
         return program
 
+    def _failure_to_exception(self, failure: ExecutionFailure) -> EngineError:
+        if failure.error_type == "ActionCancelledError":
+            return ActionCancelledError(failure.message)
+        return EngineError(failure.message)
+
+    def _normalize_failure(self, exc: Exception, step_id: str) -> ExecutionFailure:
+        if isinstance(exc, PipelineStepError):
+            return exc.failure
+        error_type = type(exc).__name__
+        exit_code = None
+        if isinstance(exc, ActionCancelledError):
+            error_type = "ActionCancelledError"
+        return ExecutionFailure(
+            step_id=step_id,
+            message=str(exc),
+            error_type=error_type,
+            exit_code=exit_code,
+        )
+
     def run_action(
         self, action_id: str, form_data: dict[str, Any], log: Callable[[str], None]
     ) -> dict[str, Any]:
@@ -360,6 +428,11 @@ class PipelineEngine:
             pipeline = [{"id": f"{action_id}_run", "run": action["run"]}]
         if not isinstance(pipeline, list):
             raise EngineError("action.pipeline must be a list")
+        on_error = action.get("on_error", [])
+        if on_error is None:
+            on_error = []
+        if not isinstance(on_error, list):
+            raise EngineError("action.on_error must be a list")
 
         with self._lock:
             event = self._cancel_events.get(action_id)
@@ -371,10 +444,48 @@ class PipelineEngine:
 
         try:
             step_results: dict[str, Any] = {}
-            self._run_steps(
-                pipeline, form_data, step_results, log, {}, action_id, event
-            )
-            return step_results
+            try:
+                self._run_steps(
+                    pipeline,
+                    form_data,
+                    step_results,
+                    log,
+                    {},
+                    action_id,
+                    event,
+                )
+                step_results["_meta"] = {"status": "success"}
+                return step_results
+            except PipelineStepError as primary_exc:
+                primary = primary_exc.failure
+                if not on_error:
+                    raise self._failure_to_exception(primary) from None
+
+                log(
+                    f"[recovery] start for step={primary.step_id}, type={primary.error_type}: {primary.message}"
+                )
+                recovery_scope = {"error": primary.to_context()}
+                try:
+                    self._run_steps(
+                        on_error,
+                        form_data,
+                        step_results,
+                        log,
+                        recovery_scope,
+                        action_id,
+                        event,
+                        allow_cancel=False,
+                        result_prefix="_recovery.",
+                    )
+                except PipelineStepError as recovery_exc:
+                    raise ActionRecoveryError(primary, recovery_exc.failure) from None
+
+                log("[recovery] completed")
+                step_results["_meta"] = {
+                    "status": "recovered",
+                    "error": primary.to_context(),
+                }
+                return step_results
         finally:
             with self._lock:
                 remaining = self._active_runs.get(action_id, 1) - 1
@@ -394,28 +505,47 @@ class PipelineEngine:
         scope: dict[str, Any],
         action_id: str,
         cancel_event: threading.Event,
+        allow_cancel: bool = True,
+        result_prefix: str = "",
     ) -> None:
-        for step in steps:
-            if cancel_event.is_set():
-                raise ActionCancelledError("Action was stopped by user")
+        for index, step in enumerate(steps):
             step_id = step.get("id", f"step_{len(step_results) + 1}")
-            ctx = self._base_context(form_data, step_results, scope)
-            evaluator = SafeEvaluator(ctx)
-            if "when" in step and not bool(render_template(step["when"], evaluator)):
-                log(f"[skip] {step_id} (when=false)")
-                continue
-            continue_on_error = bool(step.get("continue_on_error", False))
+            stored_step_id = f"{result_prefix}{step_id}"
+            if allow_cancel and cancel_event.is_set():
+                failure = ExecutionFailure(
+                    step_id=stored_step_id,
+                    message="Action was stopped by user",
+                    error_type="ActionCancelledError",
+                )
+                raise PipelineStepError(failure, index)
 
             try:
+                ctx = self._base_context(form_data, step_results, scope)
+                evaluator = SafeEvaluator(ctx)
+                if "when" in step and not bool(render_template(step["when"], evaluator)):
+                    log(f"[skip] {stored_step_id} (when=false)")
+                    continue
+                continue_on_error = bool(step.get("continue_on_error", False))
+
                 if "run" in step:
                     result = self._run_command(
-                        step_id, step["run"], evaluator, log, action_id, cancel_event
+                        stored_step_id,
+                        step["run"],
+                        evaluator,
+                        log,
+                        action_id,
+                        cancel_event,
+                        ignore_cancel=not allow_cancel,
                     )
-                    step_results[step_id] = result.__dict__
+                    step_results[stored_step_id] = result.__dict__
                     if result.exit_code != 0 and not continue_on_error:
-                        raise EngineError(
-                            f"Step {step_id} failed with exit code {result.exit_code}"
+                        failure = ExecutionFailure(
+                            step_id=stored_step_id,
+                            message=f"Step {stored_step_id} failed with exit code {result.exit_code}",
+                            error_type="StepRunFailed",
+                            exit_code=result.exit_code,
                         )
+                        raise PipelineStepError(failure, index)
                 elif "pipeline" in step:
                     nested = step["pipeline"]
                     if not isinstance(nested, list):
@@ -428,6 +558,8 @@ class PipelineEngine:
                         scope,
                         action_id,
                         cancel_event,
+                        allow_cancel=allow_cancel,
+                        result_prefix=result_prefix,
                     )
                 elif "foreach" in step:
                     foreach = step["foreach"]
@@ -436,10 +568,10 @@ class PipelineEngine:
                         raise EngineError("foreach.in must evaluate to list")
                     var_name = foreach.get("as", "item")
                     nested_steps = foreach.get("steps", [])
-                    for index, value in enumerate(items):
+                    for item_index, value in enumerate(items):
                         local_scope = dict(scope)
                         local_scope[var_name] = to_dotdict(value)
-                        local_scope["loop"] = to_dotdict({"index": index})
+                        local_scope["loop"] = to_dotdict({"index": item_index})
                         self._run_steps(
                             nested_steps,
                             form_data,
@@ -448,9 +580,13 @@ class PipelineEngine:
                             local_scope,
                             action_id,
                             cancel_event,
+                            allow_cancel=allow_cancel,
+                            result_prefix=result_prefix,
                         )
                 else:
-                    raise EngineError(f"Unknown step type in {step_id}")
+                    raise EngineError(f"Unknown step type in {stored_step_id}")
+            except PipelineStepError:
+                raise
             except (
                 EngineError,
                 ActionCancelledError,
@@ -460,10 +596,12 @@ class PipelineEngine:
                 TypeError,
                 KeyError,
             ) as exc:
+                continue_on_error = bool(step.get("continue_on_error", False))
                 if continue_on_error:
-                    log(f"[warn] {step_id}: {exc}")
+                    log(f"[warn] {stored_step_id}: {exc}")
                     continue
-                raise
+                failure = self._normalize_failure(exc, stored_step_id)
+                raise PipelineStepError(failure, index) from exc
 
     def _stream_output(
         self,
@@ -496,6 +634,7 @@ class PipelineEngine:
         log: Callable[[str], None],
         action_id: str,
         cancel_event: threading.Event,
+        ignore_cancel: bool = False,
     ) -> StepResult:
         raw_program = str(render_template(run_def.get("program"), evaluator))
         program = self._resolve_program(raw_program, evaluator)
@@ -572,7 +711,7 @@ class PipelineEngine:
             deadline = (start + timeout_s) if timeout_s is not None else None
             try:
                 while True:
-                    if cancel_event.is_set():
+                    if not ignore_cancel and cancel_event.is_set():
                         self._terminate_process(proc)
                         try:
                             proc.wait(timeout=1)
@@ -594,7 +733,7 @@ class PipelineEngine:
 
                     try:
                         exit_code = proc.wait(timeout=0.1)
-                        if cancel_event.is_set():
+                        if not ignore_cancel and cancel_event.is_set():
                             raise ActionCancelledError("Action was stopped by user")
                         break
                     except subprocess.TimeoutExpired:
@@ -634,3 +773,5 @@ def validate_config(config: dict[str, Any]) -> None:
             raise EngineError(f"action {aid} requires pipeline or run")
         if "pipeline" in action and not isinstance(action["pipeline"], list):
             raise EngineError(f"action {aid}.pipeline must be list")
+        if "on_error" in action and not isinstance(action["on_error"], list):
+            raise EngineError(f"action {aid}.on_error must be list")

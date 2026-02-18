@@ -25,9 +25,10 @@ The CLI YAML Pipeline Engine:
 3. Each action MUST have `title` and at least one of: `pipeline` or `run`.
 4. If an action has only `run`, the engine wraps it into a one-step `pipeline`.
 5. Supported step types are limited to: `run`, `pipeline`, `foreach`.
-6. Template rendering (`${...}`) applies **only to strings**, and only in specific places (see §6).
-7. Expression evaluation is sandboxed by an AST allowlist; only these calls are allowed: `len`, `empty`, `exists`.
-8. The alias `program: python` can be overridden via `runtime.python.executable`.
+6. Actions MAY define optional `on_error` steps executed after any action failure (including user stop).
+7. During `on_error`, `${error.*}` is available (`step_id`, `exit_code`, `message`, `type`).
+8. Recovery step results are stored under `_recovery.<step_id>`.
+9. The alias `program: python` can be overridden via `runtime.python.executable`.
 
 ---
 
@@ -182,6 +183,7 @@ Expressions can access:
 * `form`
 * `env`
 * `step`
+* `error` (inside `on_error` only)
 * `cwd`, `home`, `temp`, `os`
 * functions: `len(x)`, `empty(x)`, `exists(path)`
 
@@ -257,6 +259,45 @@ Optional:
 * `form` (to collect user parameters)
 
 ### 8.2 `form` schema (required for “no-source” usage)
+
+
+### 8.3 `on_error` (optional)
+
+Action-level recovery steps executed when main action execution fails for any reason:
+
+* non-zero run exit code
+* expression/template/config/runtime errors
+* user cancellation (`stop_action`)
+
+```yaml
+actions:
+  build:
+    title: "Build"
+    pipeline:
+      - id: compile
+        run: ...
+    on_error:
+      - id: cleanup
+        run:
+          program: python
+          argv:
+            - cleanup.py
+            - "--failed-step"
+            - "${error.step_id}"
+            - "--reason"
+            - "${error.message}"
+```
+
+`on_error` context fields:
+
+* `${error.step_id}`
+* `${error.exit_code}` (or empty if unavailable)
+* `${error.message}`
+* `${error.type}`
+
+If `on_error` succeeds, action status becomes `recovered` (not `success`).
+If `on_error` fails, engine returns a combined error with two sections: primary error and recovery error.
+
 
 This section defines the **supported field model**. If your current UI differs, align it to this schema for consistency.
 
