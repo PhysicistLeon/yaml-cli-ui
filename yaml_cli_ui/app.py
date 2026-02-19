@@ -5,6 +5,7 @@ import argparse
 import configparser
 import json
 import os
+import re
 import threading
 from copy import deepcopy
 from functools import partial
@@ -34,6 +35,9 @@ FAILED_COLOR = "#e74c3c"
 RECOVERED_COLOR = "#f39c12"
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 STATE_FILE_PATH = Path.home() / ".yaml_cli_ui" / "state.json"
+TOOLTIP_DELAY_MS = 500
+TOOLTIP_WRAPLENGTH_PX = 360
+TOOLTIP_MAX_TOKEN_LENGTH = 80
 
 
 HELP_CONTENT = """Как работает приложение
@@ -169,6 +173,88 @@ def save_ui_state(state: dict[str, Any], state_file: Path = STATE_FILE_PATH) -> 
     )
 
 
+class _TooltipController:
+    def __init__(
+        self,
+        root: tk.Tk,
+        *,
+        delay_ms: int = TOOLTIP_DELAY_MS,
+        wraplength_px: int = TOOLTIP_WRAPLENGTH_PX,
+    ):
+        self.root = root
+        self.delay_ms = delay_ms
+        self.wraplength_px = wraplength_px
+        self._window: tk.Toplevel | None = None
+        self._label: tk.Label | None = None
+        self._active_widget: tk.Widget | None = None
+        self._after_id: str | None = None
+        self._text: str = ""
+
+    def schedule(self, widget: tk.Widget, text: str) -> None:
+        self.hide()
+        self._active_widget = widget
+        self._text = text
+        self._after_id = self.root.after(self.delay_ms, self._show)
+
+    def cancel(self) -> None:
+        if self._after_id is not None:
+            self.root.after_cancel(self._after_id)
+            self._after_id = None
+
+    def hide(self) -> None:
+        self.cancel()
+        self._active_widget = None
+        self._text = ""
+        if self._window is not None:
+            self._window.destroy()
+            self._window = None
+            self._label = None
+
+    def _show(self) -> None:
+        self._after_id = None
+        if self._active_widget is None:
+            return
+
+        self._window = tk.Toplevel(self.root)
+        self._window.wm_overrideredirect(True)
+        x = self._active_widget.winfo_rootx() + 8
+        y = self._active_widget.winfo_rooty() + self._active_widget.winfo_height() + 8
+        self._window.wm_geometry(f"+{x}+{y}")
+        self._label = tk.Label(
+            self._window,
+            text=self._text,
+            justify="left",
+            relief="solid",
+            borderwidth=1,
+            padx=6,
+            pady=4,
+            wraplength=self.wraplength_px,
+        )
+        self._label.pack()
+
+
+def _truncate_long_tokens(text: str, max_token_length: int = TOOLTIP_MAX_TOKEN_LENGTH) -> str:
+    if max_token_length < 2:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if len(token) <= max_token_length:
+            return token
+        return f"{token[: max_token_length - 1]}…"
+
+    return re.sub(r"\S+", replace, text)
+
+
+def _normalize_action_info(raw_info: Any) -> str | None:
+    if not isinstance(raw_info, str):
+        return None
+    info = raw_info.strip()
+    if not info:
+        return None
+    return _truncate_long_tokens(info)
+
+
 class App(tk.Tk):
     def __init__(self, config_path: str, browse_dir: str | Path | None = None):
         super().__init__()
@@ -186,9 +272,11 @@ class App(tk.Tk):
         self.action_history_combos: dict[str, ttk.Combobox] = {}
         self.action_output_texts: dict[str, tk.Text] = {}
         self.action_buttons: dict[str, tk.Button] = {}
+        self.action_button_infos: dict[str, str] = {}
         self.action_running_counts: dict[str, int] = {}
         self.ui_state = load_ui_state()
         self.preset_service = PresetService(self.config_path)
+        self.tooltip = _TooltipController(self)
 
         top = ttk.Frame(self)
         top.pack(fill="x", padx=10, pady=8)
@@ -406,9 +494,11 @@ class App(tk.Tk):
         return run_id
 
     def _build_action_buttons(self) -> None:
+        self.tooltip.hide()
         for child in self.actions_frame.winfo_children():
             child.destroy()
         self.action_buttons.clear()
+        self.action_button_infos.clear()
 
         actions = self.app_config.get("actions", {})
         for index, (action_id, action) in enumerate(actions.items()):
@@ -422,6 +512,17 @@ class App(tk.Tk):
             )
             btn.grid(row=index // 4, column=index % 4, sticky="ew", padx=4, pady=4)
             self.action_buttons[action_id] = btn
+
+            info = _normalize_action_info(action.get("info"))
+            if info is not None:
+                self.action_button_infos[action_id] = info
+                btn.bind(
+                    "<Enter>",
+                    lambda _event, b=btn, text=info: self.tooltip.schedule(b, text),
+                )
+                btn.bind("<Leave>", lambda _event: self.tooltip.hide())
+                btn.bind("<ButtonPress>", lambda _event: self.tooltip.hide())
+                btn.bind("<FocusOut>", lambda _event: self.tooltip.hide())
 
         for col in range(4):
             self.actions_frame.columnconfigure(col, weight=1)

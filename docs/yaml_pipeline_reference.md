@@ -256,6 +256,7 @@ Each action MUST have:
 
 Optional:
 
+* `info: string` (optional tooltip text shown on action button hover in UI)
 * `form` (to collect user parameters)
 
 ### 8.2 `form` schema (required for “no-source” usage)

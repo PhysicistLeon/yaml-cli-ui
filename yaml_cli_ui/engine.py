@@ -769,6 +769,8 @@ def validate_config(config: dict[str, Any]) -> None:
     for aid, action in actions.items():
         if "title" not in action:
             raise EngineError(f"action {aid} requires title")
+        if "info" in action and not isinstance(action["info"], str):
+            raise EngineError(f"action {aid}.info must be string")
         if "pipeline" not in action and "run" not in action:
             raise EngineError(f"action {aid} requires pipeline or run")
         if "pipeline" in action and not isinstance(action["pipeline"], list):
