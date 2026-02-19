@@ -19,6 +19,7 @@ actions:
 
   run_script:
     title: "Run Python script"
+    info: "Runs timer.py via configured Python runtime. Useful for smoke tests."
     pipeline:
       - id: run
         run:
@@ -37,6 +38,7 @@ actions:
 
   yt_audio:
     title: Download audio
+    info: "Downloads audio from URL using yt-dlp and saves MP3 into Downloads\\yt"
     form:
       fields:
         - id: url

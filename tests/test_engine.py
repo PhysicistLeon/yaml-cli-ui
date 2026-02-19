@@ -14,6 +14,7 @@ from yaml_cli_ui.engine import (
     SafeEvaluator,
     render_template,
     to_dotdict,
+    validate_config,
 )
 
 
@@ -444,3 +445,34 @@ def test_action_without_on_error_still_raises_engine_error():
 
     with pytest.raises(EngineError):
         engine.run_action("job", {}, lambda _msg: None)
+
+
+def test_validate_config_accepts_action_info_string():
+    config = {
+        "version": 1,
+        "actions": {
+            "job": {
+                "title": "Job",
+                "info": "Helpful description",
+                "run": {"program": "python"},
+            }
+        },
+    }
+
+    validate_config(config)
+
+
+def test_validate_config_rejects_non_string_action_info():
+    config = {
+        "version": 1,
+        "actions": {
+            "job": {
+                "title": "Job",
+                "info": {"text": "bad"},
+                "run": {"program": "python"},
+            }
+        },
+    }
+
+    with pytest.raises(EngineError, match=r"action job\.info must be string"):
+        validate_config(config)

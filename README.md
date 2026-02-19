@@ -17,6 +17,7 @@ python main.py --settings app.ini
 ## Features
 
 - Top-level actions rendered as quick-launch buttons (no action dropdown).
+- Optional `actions.<id>.info` tooltip on action buttons (shown on hover with delay).
 - Action parameters are entered in a modal dialog per run.
 - Last entered action parameters are remembered between app restarts (per YAML config and action, excluding `secret` fields) and prefilled on next run.
 - Named presets per action (create/overwrite/rename/delete) stored next to YAML in `<yaml>.presets.json`.
@@ -57,6 +58,7 @@ runtime:
 actions:
   run_script:
     title: "Run Python script"
+    info: "Run process.py using configured runtime.python.executable"
     pipeline:
       - id: run
         run:

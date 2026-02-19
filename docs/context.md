@@ -144,6 +144,7 @@ actions:
 ActionDef:
 
 * title: string (required)
+* info: string (optional, UI tooltip text for action button)
 * form: optional
 * pipeline: optional list of steps
 * run: optional run step shortcut

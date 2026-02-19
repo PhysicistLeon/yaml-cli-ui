@@ -8,11 +8,34 @@ from yaml_cli_ui.app import (
     App,
     EngineError,
     HELP_CONTENT,
+    _normalize_action_info,
+    _truncate_long_tokens,
     load_launch_settings,
     load_ui_state,
     save_ui_state,
     slider_scale_for_float_field,
 )
+
+
+def test_truncate_long_tokens_keeps_short_tokens_and_truncates_long_ones():
+    text = "short https://example.com/" + ("a" * 120) + " tail"
+
+    actual = _truncate_long_tokens(text, max_token_length=20)
+
+    assert "short" in actual
+    assert "tail" in actual
+    assert "https://example.com/" not in actual
+    assert "…" in actual
+
+
+def test_normalize_action_info_supports_multiline_and_blank_handling():
+    info = "  First line\nSecond line\n"
+
+    actual = _normalize_action_info(info)
+
+    assert actual == "First line\nSecond line"
+    assert _normalize_action_info("   ") is None
+    assert _normalize_action_info(None) is None
 
 
 def test_slider_scale_for_float_step_precision():
