@@ -262,6 +262,8 @@ class RunContext:
     profile: dict[str, Any] = field(default_factory=dict)
     run: dict[str, Any] = field(default_factory=dict)
     steps: dict[str, StepResult] = field(default_factory=dict)
+    loop: dict[str, Any] = field(default_factory=dict)
+    error: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
