@@ -12,6 +12,7 @@ from ._template_utils import find_closing_brace
 from .errors import V2ExpressionError
 
 _ALLOWED_NAMESPACES = ("params", "locals", "profile", "steps", "run", "loop", "error")
+_SHORT_NAME_NAMESPACES = ("params", "locals", "run", "loop", "error")
 
 
 def resolve_name(name: str, context: Mapping[str, Any] | Any) -> Any:
@@ -23,7 +24,7 @@ def resolve_name(name: str, context: Mapping[str, Any] | Any) -> Any:
 
     if "." in normalized or "[" in normalized:
         root, remainder = _split_reference(normalized)
-        if root not in _ALLOWED_NAMESPACES:
+        if root not in _ALLOWED_NAMESPACES and not _has_context_key(context, root):
             raise V2ExpressionError(
                 f"unsupported reference root '{root}' in '{name}'; use explicit namespace"
             )
@@ -33,7 +34,12 @@ def resolve_name(name: str, context: Mapping[str, Any] | Any) -> Any:
         return _resolve_path(base, remainder, original=name)
 
     matches: list[tuple[str, Any]] = []
-    for namespace in _ALLOWED_NAMESPACES:
+
+    bindings = _get_optional_mapping(context, "bindings")
+    if normalized in bindings:
+        matches.append(("bindings", bindings[normalized]))
+
+    for namespace in _SHORT_NAME_NAMESPACES:
         try:
             bucket = _get_from_context(context, namespace)
             value = _get_member(bucket, normalized)
@@ -133,7 +139,7 @@ class _SafeEvaluator:
             return False
         if node.id == "null":
             return None
-        if node.id in _ALLOWED_NAMESPACES:
+        if node.id in _ALLOWED_NAMESPACES or _has_context_key(self._context, node.id):
             return _get_from_context(self._context, node.id)
         return resolve_name(node.id, self._context)
 
@@ -228,6 +234,22 @@ def _unwrap_expr(expr: str) -> str:
     if value.startswith("${") and value.endswith("}"):
         return value[2:-1].strip()
     return value
+
+
+def _has_context_key(context: Mapping[str, Any] | Any, key: str) -> bool:
+    if isinstance(context, Mapping):
+        return key in context
+    return hasattr(context, key)
+
+
+def _get_optional_mapping(context: Mapping[str, Any] | Any, key: str) -> Mapping[str, Any]:
+    try:
+        value = _get_from_context(context, key)
+    except V2ExpressionError:
+        return {}
+    if isinstance(value, Mapping):
+        return value
+    return {}
 
 
 def _get_from_context(context: Mapping[str, Any] | Any, key: str) -> Any:
