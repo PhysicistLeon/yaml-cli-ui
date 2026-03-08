@@ -35,3 +35,16 @@ From legacy `app.py`, the following parts are planned to be extracted into reusa
 - field binding
 - log tabs
 - run history
+
+## Step 3: v2 internal data models
+
+The `yaml_cli_ui/v2/models.py` module now defines a stable dataclass-based core for v2-lite:
+- document: `V2Document`
+- definitions: `ImportDef`, `ProfileDef`, `ParamDef`, `CommandDef`, `PipelineDef`, `LauncherDef`
+- execution shape: `RunSpec`, `StepSpec`, `ForeachSpec`, `OnErrorSpec`
+- runtime/result containers: `RunContext`, `StepResult`, `ErrorContext`
+- enums: `ParamType`, `SecretSource`, `StepKind`, `StepStatus` (and reserved `ArgvItemKind`)
+
+Core fields are intentionally strict where cheap invariants help (`RunSpec.program`, launcher required fields, non-empty foreach/on_error step lists) and intentionally permissive where later stages need flexibility (`locals: dict[str, Any]`, `argv: list[Any]`, expression-bearing fields typed as `Any`).
+
+Not modeled deeply yet: full YAML parsing rules, import graph resolution, expression evaluation semantics, argv DSL typing/validation, and execution orchestration details.

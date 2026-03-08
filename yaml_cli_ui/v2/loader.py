@@ -57,7 +57,7 @@ def _parse_launchers(raw_doc: dict[str, Any]) -> dict[str, LauncherDef]:
             title=title,
             use=use,
             info=entry.get("info") if isinstance(entry.get("info"), str) else None,
-            with_args=entry.get("with", {}) if isinstance(entry.get("with"), dict) else {},
+            with_values=entry.get("with", {}) if isinstance(entry.get("with"), dict) else {},
         )
     return parsed
 
@@ -71,4 +71,11 @@ def load_v2_document(path: str | Path) -> V2Document:
     if not isinstance(version, int):
         raise V2LoadError("v2 document field 'version' must be an integer")
 
-    return V2Document(raw=resolved, version=version, launchers=_parse_launchers(resolved))
+    resolved_path = Path(path).resolve()
+    return V2Document(
+        raw=resolved,
+        version=version,
+        launchers=_parse_launchers(resolved),
+        source_path=resolved_path,
+        base_dir=resolved_path.parent,
+    )
