@@ -1,6 +1,7 @@
 """Public API surface for YAML CLI UI v2 scaffold."""
 
 from .expr import evaluate_expression, resolve_name
+from .argv import is_conditional_item, is_option_map, serialize_argv, serialize_argv_item
 from .context import (
     build_base_context,
     build_imported_locals_context,
@@ -71,4 +72,8 @@ __all__ = [
     "build_imported_locals_context",
     "evaluate_imported_document_locals",
     "context_to_mapping",
+    "serialize_argv",
+    "serialize_argv_item",
+    "is_option_map",
+    "is_conditional_item",
 ]

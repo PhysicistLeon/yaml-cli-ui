@@ -95,7 +95,10 @@ class ParamDef:
 
 @dataclass(slots=True)
 class RunSpec:
-    """Process execution spec for command callables."""
+    """Process execution spec for command callables.
+
+    `argv` uses the v2 argv DSL (scalar item, option map, conditional item).
+    """
 
     program: str
     argv: list[Any] = field(default_factory=list)
