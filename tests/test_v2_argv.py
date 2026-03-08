@@ -43,6 +43,8 @@ def ctx(tmp_path: Path) -> dict:
 
 def test_predicates():
     assert is_option_map({"--x": 1}) is True
+    assert is_option_map({"": 1}) is False
+    assert is_option_map({1: "x"}) is False
     assert is_option_map({"when": True, "then": "x"}) is False
     assert is_option_map({"--x": 1, "--y": 2}) is False
 
@@ -68,6 +70,8 @@ def test_option_map_shapes_and_values(ctx: dict):
     assert serialize_argv_item({"--item": []}, ctx) == []
     assert serialize_argv_item({"--item": ["a", "b"]}, ctx) == ["--item", "a", "--item", "b"]
     assert serialize_argv_item({"--flag": "false"}, ctx) == ["--flag", "false"]
+    with pytest.raises(V2ExecutionError, match="must not be null"):
+        serialize_argv_item({"--item": [1, None, 2]}, ctx)
 
 
 def test_conditional_items(ctx: dict):
@@ -81,6 +85,16 @@ def test_conditional_items(ctx: dict):
         {"when": "$params.need_format", "then": {"--audio-format": "mp3"}},
         ctx,
     ) == ["--audio-format", "mp3"]
+
+
+
+
+def test_conditional_then_disallows_nested_conditional(ctx: dict):
+    with pytest.raises(V2ValidationError, match="then"):
+        serialize_argv_item(
+            {"when": True, "then": {"when": False, "then": "--x"}},
+            ctx,
+        )
 
 
 def test_conditional_invalid_shapes(ctx: dict):

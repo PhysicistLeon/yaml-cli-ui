@@ -16,7 +16,8 @@ Serialization rules:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from .errors import V2ExecutionError, V2ValidationError
 from .renderer import render_scalar_or_ref, render_value
@@ -30,7 +31,7 @@ def is_option_map(item: Any) -> bool:
     if not isinstance(item, Mapping) or len(item) != 1:
         return False
     key = next(iter(item.keys()))
-    return key not in _RESERVED_KEYS
+    return isinstance(key, str) and key != "" and key not in _RESERVED_KEYS
 
 
 def is_conditional_item(item: Any) -> bool:
@@ -102,7 +103,10 @@ def serialize_conditional_item(item: Mapping[str, Any], context: Mapping[str, An
 
     when_value = render_scalar_or_ref(item["when"], context)
     if bool(when_value):
-        return serialize_argv_item(item["then"], context)
+        then_item = item["then"]
+        if is_conditional_item(then_item):
+            raise V2ValidationError("Conditional item 'then' must be scalar item or option map")
+        return serialize_argv_item(then_item, context)
     return []
 
 
@@ -113,24 +117,22 @@ def _serialize_scalar_item(item: Any, context: Mapping[str, Any]) -> list[str]:
         raise V2ValidationError("Standalone argv item must not be list-like")
 
     rendered = render_scalar_or_ref(item, context)
-    if rendered is None:
-        raise V2ExecutionError("Standalone argv scalar item rendered to null")
-    if isinstance(rendered, (list, Mapping)):
-        raise V2ExecutionError(
-            "Standalone argv scalar item rendered to non-scalar value (list/dict)"
-        )
-    return [str(rendered)]
+    return [_stringify_scalar(rendered, "Standalone argv scalar item")]
 
 
 def _serialize_option_list_values(key: str, values: list[Any]) -> list[str]:
     tokens: list[str] = []
     for index, value in enumerate(values):
-        if isinstance(value, (list, Mapping)):
-            raise V2ExecutionError(
-                f"Option list value at index {index} for '{key}' must be scalar"
-            )
-        tokens.extend([key, str(value)])
+        tokens.extend([key, _stringify_scalar(value, f"Option list value at index {index} for '{key}'")])
     return tokens
+
+
+def _stringify_scalar(value: Any, context_label: str) -> str:
+    if value is None:
+        raise V2ExecutionError(f"{context_label} must not be null")
+    if isinstance(value, (list, tuple, set, Mapping)):
+        raise V2ExecutionError(f"{context_label} must be scalar")
+    return str(value)
 
 
 __all__ = [
