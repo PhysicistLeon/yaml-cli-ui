@@ -276,6 +276,7 @@ class V2Document:
     commands: dict[str, CommandDef] = field(default_factory=dict)
     pipelines: dict[str, PipelineDef] = field(default_factory=dict)
     launchers: dict[str, LauncherDef] = field(default_factory=dict)
+    imported_documents: dict[str, "V2Document"] = field(default_factory=dict)
     source_path: Path | None = None
     base_dir: Path | None = None
     raw: dict[str, Any] = field(default_factory=dict)
@@ -325,5 +326,19 @@ __all__ = [
     "ImportDef",
     "OnErrorSpec",
     "StepKind",
-    *PUBLIC_API_MODELS,
+    "CommandDef",
+    "ErrorContext",
+    "ForeachSpec",
+    "LauncherDef",
+    "ParamDef",
+    "ParamType",
+    "PipelineDef",
+    "ProfileDef",
+    "RunContext",
+    "RunSpec",
+    "SecretSource",
+    "StepResult",
+    "StepSpec",
+    "StepStatus",
+    "V2Document",
 ]
