@@ -261,9 +261,30 @@ class RunContext:
     locals: dict[str, Any] = field(default_factory=dict)
     profile: dict[str, Any] = field(default_factory=dict)
     run: dict[str, Any] = field(default_factory=dict)
-    steps: dict[str, StepResult] = field(default_factory=dict)
-    loop: dict[str, Any] = field(default_factory=dict)
-    error: dict[str, Any] = field(default_factory=dict)
+    steps: dict[str, Any] = field(default_factory=dict)
+    loop: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    imported: dict[str, dict[str, Any]] | None = None
+    bindings: dict[str, Any] = field(default_factory=dict)
+
+    def as_mapping(self) -> dict[str, Any]:
+        """Return renderer/evaluator-ready mapping representation."""
+
+        payload: dict[str, Any] = {
+            "params": dict(self.params),
+            "locals": dict(self.locals),
+            "profile": dict(self.profile),
+            "run": dict(self.run),
+            "steps": dict(self.steps),
+            "bindings": dict(self.bindings),
+        }
+        if self.loop is not None:
+            payload["loop"] = dict(self.loop)
+        if self.error is not None:
+            payload["error"] = dict(self.error)
+        for alias, values in (self.imported or {}).items():
+            payload[alias] = {"locals": dict(values)}
+        return payload
 
 
 @dataclass(slots=True)
