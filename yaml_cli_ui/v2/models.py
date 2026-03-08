@@ -276,10 +276,12 @@ class RunContext:
             "profile": dict(self.profile),
             "run": dict(self.run),
             "steps": dict(self.steps),
-            "loop": dict(self.loop or {}),
-            "error": dict(self.error or {}),
             "bindings": dict(self.bindings),
         }
+        if self.loop is not None:
+            payload["loop"] = dict(self.loop)
+        if self.error is not None:
+            payload["error"] = dict(self.error)
         for alias, values in (self.imported or {}).items():
             payload[alias] = {"locals": dict(values)}
         return payload

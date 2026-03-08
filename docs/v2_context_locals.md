@@ -24,14 +24,14 @@ Each local can reference:
 - imported namespaces via `ns.locals.*`
 - `run.*`
 
-Locals evaluation intentionally does **not** allow runtime `steps/loop/error` values.
+Locals evaluation intentionally does **not** include or allow runtime `steps/loop/error` namespaces.
 
 ## Runtime context shape
 
 `RunContext.as_mapping()` produces a mapping containing:
 
 - root namespaces: `params`, `locals`, `profile`, `run`, `steps`
-- optional namespaces: `loop`, `error`
+- optional namespaces: `loop`, `error` (included only when present)
 - imported aliases: `{alias: {locals: ...}}`
 - short-name bindings bucket: `bindings`
 

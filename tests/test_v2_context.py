@@ -3,7 +3,9 @@ from __future__ import annotations
 import pytest
 
 from yaml_cli_ui.v2.context import (
+    build_imported_locals_context,
     build_runtime_context,
+    evaluate_root_locals,
     merge_with_bindings,
     resolve_selected_profile,
 )
@@ -99,6 +101,8 @@ def test_context_shape_and_no_auto_merge_of_imported_locals():
     mapping = runtime.as_mapping()
 
     assert set(["params", "locals", "profile", "run", "steps"]).issubset(mapping.keys())
+    assert "loop" not in mapping
+    assert "error" not in mapping
     assert mapping["media"]["locals"]["script_dir"] == "/work/scripts"
     assert "script_dir" not in mapping["locals"]
 
@@ -120,3 +124,47 @@ def test_merge_with_bindings_supports_short_name_and_ambiguity():
     ambiguous["locals"]["collection"] = "local"
     with pytest.raises(V2ExpressionError, match="ambiguous short name"):
         evaluate_expression("collection", ambiguous)
+
+
+def test_evaluate_root_locals_public_api():
+    doc = _root_doc(profiles={"home": ProfileDef(workdir="/work")})
+    imported = build_imported_locals_context(
+        doc,
+        params={"collection": "incoming"},
+        selected_profile={"workdir": "/work"},
+        run={"id": "r1"},
+    )
+    values = evaluate_root_locals(
+        doc,
+        params={"collection": "incoming"},
+        selected_profile={"workdir": "/work"},
+        run={"id": "r1"},
+        imported_locals=imported,
+    )
+    assert values["run_root"] == "/work/runs/incoming"
+    assert values["scrape_script"] == "/work/scripts/scrape.py"
+
+
+def test_build_imported_locals_context_public_api():
+    doc = _root_doc(profiles={"home": ProfileDef(workdir="/work")})
+    imported = build_imported_locals_context(
+        doc,
+        params={"collection": "incoming"},
+        selected_profile={"workdir": "/work"},
+        run={"id": "r1"},
+    )
+    assert imported["media"]["script_dir"] == "/work/scripts"
+    assert imported["media"]["scrape_script"] == "/work/scripts/scrape.py"
+
+
+def test_merge_with_bindings_does_not_create_top_level_shadowing():
+    context = {
+        "params": {"collection": "incoming"},
+        "locals": {},
+        "profile": {},
+        "run": {},
+        "steps": {},
+    }
+    merged = merge_with_bindings(context, {"params": "bad_shadow"})
+    assert isinstance(merged["params"], dict)
+    assert evaluate_expression("params.collection", merged) == "incoming"

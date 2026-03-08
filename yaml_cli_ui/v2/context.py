@@ -233,9 +233,6 @@ def _evaluate_document_locals(
             "profile": profile,
             "locals": evaluated,
             "run": run_values,
-            "steps": {},
-            "loop": {},
-            "error": {},
             "bindings": {},
         }
         for alias, values in imported.items():
