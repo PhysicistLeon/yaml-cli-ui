@@ -20,6 +20,7 @@ def test_v2_document_minimal_model_shape():
 
     assert doc.version == 2
     assert "hello" in doc.launchers
+    assert doc.imported_documents == {}
 
 
 def test_v2_document_callables_merges_commands_and_pipelines():
