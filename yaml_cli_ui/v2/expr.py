@@ -11,7 +11,8 @@ from typing import Any
 from ._template_utils import find_closing_brace
 from .errors import V2ExpressionError
 
-_ALLOWED_NAMESPACES = ("params", "locals", "profile", "steps", "run", "loop", "error")
+_EXPLICIT_ROOT_NAMESPACES = ("params", "locals", "profile", "steps", "run", "loop", "error")
+_SHORT_NAME_NAMESPACES = ("bindings", "params", "locals", "run", "loop", "error")
 
 
 def resolve_name(name: str, context: Mapping[str, Any] | Any) -> Any:
@@ -23,7 +24,8 @@ def resolve_name(name: str, context: Mapping[str, Any] | Any) -> Any:
 
     if "." in normalized or "[" in normalized:
         root, remainder = _split_reference(normalized)
-        if root not in _ALLOWED_NAMESPACES:
+        context_roots = _context_keys(context)
+        if root not in _EXPLICIT_ROOT_NAMESPACES and root not in context_roots:
             raise V2ExpressionError(
                 f"unsupported reference root '{root}' in '{name}'; use explicit namespace"
             )
@@ -32,8 +34,16 @@ def resolve_name(name: str, context: Mapping[str, Any] | Any) -> Any:
             return base
         return _resolve_path(base, remainder, original=name)
 
+    try:
+        bindings = _get_from_context(context, "bindings")
+        return _get_member(bindings, normalized)
+    except V2ExpressionError:
+        pass
+
     matches: list[tuple[str, Any]] = []
-    for namespace in _ALLOWED_NAMESPACES:
+    for namespace in _SHORT_NAME_NAMESPACES:
+        if namespace == "bindings":
+            continue
         try:
             bucket = _get_from_context(context, namespace)
             value = _get_member(bucket, normalized)
@@ -133,7 +143,9 @@ class _SafeEvaluator:
             return False
         if node.id == "null":
             return None
-        if node.id in _ALLOWED_NAMESPACES:
+        if node.id in _EXPLICIT_ROOT_NAMESPACES or node.id == "bindings":
+            return _get_from_context(self._context, node.id)
+        if node.id in _context_keys(self._context):
             return _get_from_context(self._context, node.id)
         return resolve_name(node.id, self._context)
 
@@ -229,6 +241,15 @@ def _unwrap_expr(expr: str) -> str:
         return value[2:-1].strip()
     return value
 
+
+
+def _context_keys(context: Mapping[str, Any] | Any) -> set[str]:
+    if isinstance(context, Mapping):
+        return {str(key) for key in context.keys()}
+    try:
+        return {name for name in dir(context) if not name.startswith("_")}
+    except Exception:  # noqa: BLE001
+        return set()
 
 def _get_from_context(context: Mapping[str, Any] | Any, key: str) -> Any:
     if isinstance(context, Mapping):
