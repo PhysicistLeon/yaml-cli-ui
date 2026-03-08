@@ -102,3 +102,8 @@ def test_extract_local_refs():
     assert "run_root" in extract_local_refs("${locals.run_root}\\x")
     assert "urls_file" in extract_local_refs("$locals.urls_file")
     assert extract_local_refs("plain") == set()
+
+
+def test_extract_local_refs_ignores_escaped_literals():
+    refs = extract_local_refs("$${locals.run_root} $$locals.urls_file ${locals.urls_file}")
+    assert refs == {"urls_file"}

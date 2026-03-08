@@ -71,3 +71,22 @@ def test_render_short_name_ambiguity_raises(tmp_path: Path):
     ctx["params"]["urls_file"] = "a"
     with pytest.raises(V2ExpressionError, match="ambiguous"):
         render_scalar_or_ref("$urls_file", ctx)
+
+
+def test_render_string_nested_braces_expression(tmp_path: Path):
+    ctx = _ctx(tmp_path)
+    rendered = render_string("value=${{'k': params.count}['k']}", ctx)
+    assert rendered == "value=5"
+
+
+def test_render_value_recursion_for_list_and_dict(tmp_path: Path):
+    ctx = _ctx(tmp_path)
+    value = {
+        "a": ["$params.max_items", "x=${params.count}"],
+        "b": {"nested": "$locals.urls_file"},
+    }
+    rendered = render_value(value, ctx)
+    assert rendered == {
+        "a": [10, "x=5"],
+        "b": {"nested": ctx["locals"]["urls_file"]},
+    }
