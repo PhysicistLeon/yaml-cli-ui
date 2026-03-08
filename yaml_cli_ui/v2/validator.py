@@ -33,18 +33,18 @@ def _validate_version(doc: V2Document) -> None:
 
 def _validate_root_launchers(doc: V2Document) -> None:
     if not doc.launchers:
-        raise V2ValidationError("root v2 document must contain non-empty 'launchers'")
+        raise V2ValidationError("V2E_ROOT_LAUNCHERS_REQUIRED: root v2 document must contain non-empty 'launchers'")
 
 
 def _validate_imported_documents(doc: V2Document) -> None:
     for alias, imported in doc.imported_documents.items():
         if imported.profiles:
             raise V2ValidationError(
-                f"imported document '{alias}' ({imported.source_path}) must not define 'profiles'"
+                f"V2E_IMPORTED_PROFILES_FORBIDDEN: imported document '{alias}' ({imported.source_path}) must not define 'profiles'"
             )
         if imported.launchers:
             raise V2ValidationError(
-                f"imported document '{alias}' ({imported.source_path}) must not define 'launchers'"
+                f"V2E_IMPORTED_LAUNCHERS_FORBIDDEN: imported document '{alias}' ({imported.source_path}) must not define 'launchers'"
             )
         _validate_callable_namespace(imported)
         _validate_locals_ordering(imported)
@@ -58,7 +58,7 @@ def _validate_callable_namespace(doc: V2Document) -> None:
     if conflicts:
         names = ", ".join(conflicts)
         raise V2ValidationError(
-            f"callable namespace conflict in {doc.source_path}: commands/pipelines duplicate names: {names}"
+            f"V2E_CALLABLE_NAMESPACE_CONFLICT: callable namespace conflict in {doc.source_path}: commands/pipelines duplicate names: {names}"
         )
 
 
@@ -85,7 +85,7 @@ def _validate_locals_ordering(doc: V2Document) -> None:
         unresolved = {ref for ref in refs if ref != name and ref not in seen}
         if unresolved:
             raise V2ValidationError(
-                f"local '{name}' in {doc.source_path} references not-yet-defined locals: "
+                f"V2E_LOCALS_ORDERING: local '{name}' in {doc.source_path} references not-yet-defined locals: "
                 f"{', '.join(sorted(unresolved))}"
             )
         seen.add(name)
@@ -108,7 +108,7 @@ def _validate_commands(doc: V2Document) -> None:
 
 def _validate_command(name: str, command: CommandDef, doc: V2Document) -> None:
     if command.run is None:
-        raise V2ValidationError(f"command '{name}' in {doc.source_path} must define 'run'")
+        raise V2ValidationError(f"V2E_COMMAND_RUN_REQUIRED: command '{name}' in {doc.source_path} must define 'run'")
     if not isinstance(command.run.program, str) or not command.run.program.strip():
         raise V2ValidationError(f"command '{name}' in {doc.source_path} must define non-empty run.program")
     if not isinstance(command.run.argv, list):
@@ -139,7 +139,7 @@ def _validate_steps(steps: list[StepSpec | str], owner: str, doc: V2Document) ->
         has_use = step.use is not None
         has_foreach = step.foreach is not None
         if has_use == has_foreach:
-            raise V2ValidationError(f"{location} in {doc.source_path} must define exactly one of use/foreach")
+            raise V2ValidationError(f"V2E_STEP_MODE_EXCLUSIVE: {location} in {doc.source_path} must define exactly one of use/foreach")
 
         if step.step is not None and (not isinstance(step.step, str) or not step.step.strip()):
             raise V2ValidationError(f"{location} in {doc.source_path} has invalid 'step' field")
@@ -155,7 +155,7 @@ def _validate_foreach(foreach: Any, owner: str, doc: V2Document) -> None:
     if foreach.in_expr is None:
         raise V2ValidationError(f"{owner} in {doc.source_path} missing foreach.in")
     if not isinstance(foreach.as_name, str) or not foreach.as_name.strip():
-        raise V2ValidationError(f"{owner} in {doc.source_path} missing non-empty foreach.as")
+        raise V2ValidationError(f"V2E_FOREACH_AS_REQUIRED: {owner} in {doc.source_path} missing non-empty foreach.as")
     if not isinstance(foreach.steps, list) or not foreach.steps:
         raise V2ValidationError(f"{owner} in {doc.source_path} missing non-empty foreach.steps")
     _validate_steps(foreach.steps, f"{owner} foreach", doc)

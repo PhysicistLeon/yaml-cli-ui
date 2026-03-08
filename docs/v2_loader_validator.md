@@ -13,7 +13,9 @@
 
 - `version == 2`.
 - Root-документ содержит непустой `launchers`.
+- Imported документы могут содержать `imports`, `locals`, `commands`, `pipelines`.
 - Imported документы не содержат `profiles` и `launchers`.
+- `params` в imported документах пока не считаются частью root runtime schema.
 - Имена `commands` и `pipelines` не пересекаются в одном документе.
 - `locals` не ссылаются на local, объявленный ниже (`$locals.name`, `${locals.name}`).
 - `commands` имеют `run.program` и `run.argv` (list).

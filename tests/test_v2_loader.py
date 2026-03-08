@@ -219,3 +219,79 @@ launchers:
     doc = load_v2_document(root)
 
     assert doc.imported_documents["rel"].source_path == imported.resolve()
+
+
+def test_nested_import_path_resolves_relative_to_imported_file(tmp_path: Path):
+    root = tmp_path / "root.yaml"
+    imported = tmp_path / "packs" / "imported.yaml"
+    shared = tmp_path / "packs" / "lib" / "shared.yaml"
+
+    _write(
+        shared,
+        """
+version: 2
+commands:
+  shared_command:
+    run:
+      program: python
+      argv: [-V]
+""",
+    )
+    _write(
+        imported,
+        """
+version: 2
+imports:
+  shared: ./lib/shared.yaml
+pipelines:
+  p:
+    steps: [shared_command]
+""",
+    )
+    _write(
+        root,
+        """
+version: 2
+imports:
+  imp: ./packs/imported.yaml
+commands:
+  c:
+    run:
+      program: python
+      argv: [-V]
+launchers:
+  l:
+    title: L
+    use: c
+""",
+    )
+
+    doc = load_v2_document(root)
+
+    nested = doc.imported_documents["imp"].imported_documents["shared"]
+    assert nested.source_path == shared.resolve()
+
+
+def test_unknown_param_type_raises_v2_load_error(tmp_path: Path):
+    root = tmp_path / "root.yaml"
+    _write(
+        root,
+        """
+version: 2
+params:
+  bad:
+    type: unexpected_type
+commands:
+  c:
+    run:
+      program: python
+      argv: [-V]
+launchers:
+  l:
+    title: L
+    use: c
+""",
+    )
+
+    with pytest.raises(V2LoadError, match="unknown param type"):
+        load_v2_document(root)

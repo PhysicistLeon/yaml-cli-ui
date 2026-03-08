@@ -81,7 +81,9 @@ def _build_params(raw_doc: dict[str, Any], source_path: Path) -> dict[str, Param
             try:
                 param_type = ParamType(param_type)
             except ValueError:
-                param_type = ParamType.STRING
+                raise V2LoadError(
+                    f"unknown param type '{param_type}' for param '{name}' in file: {source_path}"
+                ) from None
         params[name] = ParamDef(
             type=param_type,
             title=entry.get("title"),
