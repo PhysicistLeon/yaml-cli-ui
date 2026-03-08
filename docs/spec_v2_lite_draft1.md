@@ -402,11 +402,32 @@ Invalid shape example (MUST fail validation):
 4. `continue_on_error=true` keeps parent pipeline running; step status remains `failed`.
 5. `stdout`/`stderr` allowed values: `capture`, `inherit`, `file:<path>`.
 6. Defaults: `stdout=capture`, `stderr=capture`.
-7. Program runtime override MAY resolve `program: python` via `profile.runtimes.python`.
+7. Program runtime override MUST be applied when `run.program` exactly matches a key in `profile.runtimes`.
+   - If a matching key exists, engine MUST use the mapped executable/value.
+   - If no matching key exists, engine MUST use literal `run.program`.
 8. Environment merge order MUST be:
    - `os.environ`
    - `profile.env`
    - `run.env`
+
+### 7.7.1 `on_error` block shape
+
+`on_error` is a recovery block with the following canonical shape:
+
+```yaml
+on_error:
+  steps:
+    - step: cleanup
+      use: fs.remove_file
+      with:
+        path: $locals.temp_file
+```
+
+Rules:
+
+- `on_error` MUST be a map.
+- `on_error.steps` MUST exist and MUST be a list of valid pipeline step items.
+- `on_error` MAY be declared on `command` and `pipeline` definitions.
 
 ### 7.8 Pipeline semantics
 
@@ -445,7 +466,8 @@ Default behavior:
 
 - step failure stops current pipeline,
 - if `on_error` exists then recovery runs,
-- if recovered successfully -> status `recovered`, else `failed` and both primary/recovery errors are retained.
+- status `recovered` MUST replace `failed` only when recovery completes successfully,
+- if recovery fails (or is absent and failure is not continued), final status remains `failed`, and both primary/recovery errors are retained when recovery was attempted.
 
 ### 7.12 Launchers
 
@@ -536,6 +558,11 @@ The following MUST NOT resolve via short-name fallback:
 
 - `profile`, `run`, `steps`, `loop`, `error`,
 - imported locals from other documents.
+
+Additional imported-doc rule:
+
+- In imported documents, short-name fallback MUST NEVER resolve locals from other import namespaces.
+- Cross-namespace imported locals MUST be referenced only via explicit `$ns.locals.x`.
 
 Examples:
 
@@ -1105,4 +1132,3 @@ The spec document MUST include:
 5. migration notes v1->v2;
 6. compatibility strategy;
 7. UI vs engine responsibility matrix.
-
