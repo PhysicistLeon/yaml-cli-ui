@@ -11,6 +11,7 @@ The CLI YAML Pipeline Engine:
 * Loads a YAML file describing a CLI-driven workflow.
 * Shows top-level actions as a set of **quick-launch buttons**.
 * Opens a modal parameter dialog for the selected action and collects user inputs.
+* Persists reusable action parameters in `<yaml>.presets.json` (named presets + last-run state).
 * Executes a **pipeline of CLI steps**.
 * Safely constructs subprocess calls using an **argv list** (not shell strings).
 * Supports **conditional steps**, **nested pipelines**, and **batch execution** via `foreach`.
@@ -29,6 +30,7 @@ The CLI YAML Pipeline Engine:
 7. During `on_error`, `${error.*}` is available (`step_id`, `exit_code`, `message`, `type`).
 8. Recovery step results are stored under `_recovery.<step_id>`.
 9. The alias `program: python` can be overridden via `runtime.python.executable`.
+10. Action parameter presets are stored next to YAML in `<yaml>.presets.json`.
 
 ---
 
@@ -300,7 +302,7 @@ If `on_error` succeeds, action status becomes `recovered` (not `success`).
 If `on_error` fails, engine returns a combined error with two sections: primary error and recovery error.
 
 
-This section defines the **supported field model**. If your current UI differs, align it to this schema for consistency.
+This section defines the **supported field model in the current UI implementation**.
 
 ```yaml
 form:
@@ -324,8 +326,11 @@ All fields support:
 
 Validation properties (type-dependent):
 
-* `regex: string` (string/text)
 * `min`, `max`, `step` (int/float)
+
+Current implementation note:
+
+* `regex` is not enforced in runtime validation by the current UI.
 
 UI hint properties (optional, engine-safe to ignore):
 
@@ -350,7 +355,13 @@ UI hint properties (optional, engine-safe to ignore):
 
   * `kind: file|dir` (optional)
   * `must_exist: bool` (optional, default false)
-  * `multiple: bool` (optional, default false)
+  * `multiple: bool` (declared in schema docs, but not implemented in current UI behavior)
+
+* `text`
+* `secret`
+
+  * `source: inline|env` (optional, default `inline`)
+  * `env: string` (used when `source: env`)
 
 **Structured**
 
@@ -359,7 +370,7 @@ UI hint properties (optional, engine-safe to ignore):
 * `struct_list`
   Value is `list<object>`, with:
 
-  * `item_schema: map<string, FieldDef>` (required)
+  * `item_schema: map<string, FieldDef>` (documented shape; not runtime-validated by current UI)
 * `tri_bool`
   Value is the string `"auto" | "true" | "false"`.
 
@@ -367,7 +378,9 @@ UI hint properties (optional, engine-safe to ignore):
 
 * `choice` yields a single string.
 * `multichoice` yields `list<string>`.
-* `path.multiple: true` yields `list<string>`.
+* `path.multiple` is documented in schema notes but current UI collects `path` as a single string.
+* `kv_list`/`struct_list` are entered as text and parsed using YAML parser; JSON array syntax is also valid.
+* `secret` with `source: env` is excluded from saved form state/presets and resolved from environment at run time.
 * Numeric fields MAY render as sliders when both `min` and `max` are provided.
 * `widget` is an optional UI hint: execution engine ignores it, UI MAY use it.
 * If `widget` is absent, UI chooses rendering automatically.
@@ -593,9 +606,123 @@ Only use `equals` if the target CLI accepts it.
 
 ---
 
-## 11. Windows practice (PowerShell + paths)
+## 11. JSON files for action arguments (`<yaml>.presets.json`)
 
-### 11.1 Recommended PowerShell step pattern
+The application supports JSON-based argument persistence via presets stored near the loaded YAML file:
+
+* Presets file path: `<your_config>.presets.json`
+* Managed in UI: create / overwrite / rename / delete named presets
+* Last-run mode is persisted as either:
+
+  * snapshot (`mode: snapshot`, inline values)
+  * reference (`mode: preset_ref`, name of last launched named preset)
+
+Minimal example:
+
+```json
+{
+  "version": 1,
+  "actions": {
+    "build": {
+      "presets": {
+        "smoke": {
+          "values": {
+            "target": "tests",
+            "verbose": true
+          }
+        }
+      },
+      "last_run": {
+        "mode": "preset_ref",
+        "preset_name": "smoke"
+      }
+    }
+  }
+}
+```
+
+Compatibility behavior when form schema changes:
+
+* unknown fields from preset JSON are ignored for form fill
+* UI shows warning with unused fields
+
+Security behavior:
+
+* fields with `type: secret` are not persisted into presets
+* for `secret` + `source: env`, value is taken from process environment by `env` key
+
+---
+
+## 12. Minimal templates (YAML + preset JSON)
+
+### 12.1 Minimal YAML action with form
+
+```yaml
+version: 1
+actions:
+  build:
+    title: "Build"
+    form:
+      fields:
+        - id: target
+          type: string
+          required: true
+        - id: verbose
+          type: bool
+          default: false
+    pipeline:
+      - id: run
+        run:
+          program: "python"
+          argv:
+            - "build.py"
+            - "--target": "${form.target}"
+            - "--verbose": "${form.verbose}"
+```
+
+### 12.2 Matching `<yaml>.presets.json`
+
+```json
+{
+  "version": 1,
+  "actions": {
+    "build": {
+      "presets": {
+        "smoke": {
+          "values": {
+            "target": "tests",
+            "verbose": true
+          }
+        }
+      },
+      "last_run": {
+        "mode": "snapshot",
+        "values": {
+          "target": "tests",
+          "verbose": true
+        }
+      }
+    }
+  }
+}
+```
+
+### 12.3 `kv_list` / `struct_list` input format (JSON/YAML list)
+
+In the form dialog, `kv_list` and `struct_list` fields accept text parsed as YAML; JSON array is valid:
+
+```json
+[
+  {"k": "Authorization", "v": "Bearer ..."},
+  {"k": "Accept", "v": "application/json"}
+]
+```
+
+---
+
+## 13. Windows practice (PowerShell + paths)
+
+### 13.1 Recommended PowerShell step pattern
 
 ```yaml
 run:
@@ -609,7 +736,7 @@ run:
       Copy-Item -LiteralPath $src -Destination $dst -Force
 ```
 
-### 11.2 Paths
+### 13.2 Paths
 
 * In double-quoted YAML strings: use `\\`
 * In block strings (`|` / `>`): backslashes are more readable
@@ -624,7 +751,7 @@ run:
 
 ---
 
-## 12. Anti-patterns
+## 14. Anti-patterns
 
 1. **Deep var dependency chains** (single-pass vars rendering)
 
@@ -642,7 +769,7 @@ run:
 
 ---
 
-## 13. Known limitations
+## 15. Known limitations
 
 1. No recursive/multi-pass var resolution.
 2. Var resolution order depends on map iteration order.
@@ -650,12 +777,15 @@ run:
 4. Expression calls restricted to `len/empty/exists`.
 5. Template rendering is applied only in explicit engine-controlled locations.
 6. `program: python` override triggers only on the exact string `python`.
+7. `path.multiple` is not implemented in current form UI collection.
+8. `regex` validation for string/text fields is not implemented in current form validation.
+9. `struct_list.item_schema` is not validated by runtime form parser.
 
 ---
 
-## 14. Ready-to-use templates
+## 16. Ready-to-use templates
 
-### 14.1 Python runtime override
+### 16.1 Python runtime override
 
 ```yaml
 version: 1
@@ -677,7 +807,7 @@ actions:
             - "C:\\repo\\input.txt"
 ```
 
-### 14.2 PowerShell copy artifact
+### 16.2 PowerShell copy artifact
 
 ```yaml
 version: 1
@@ -704,7 +834,7 @@ actions:
               Copy-Item -LiteralPath $src -Destination $dst -Force
 ```
 
-### 14.3 Conditional + foreach
+### 16.3 Conditional + foreach
 
 ```yaml
 version: 1
