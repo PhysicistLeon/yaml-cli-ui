@@ -7,6 +7,7 @@ Build a **Python application** that:
 * Loads a YAML file describing a CLI-driven workflow.
 * Shows top-level actions as a set of quick-launch buttons.
 * Opens a modal parameter dialog for the selected action and collects user inputs.
+* Persists reusable action parameters in `<yaml>.presets.json`.
 * Executes a **pipeline of CLI steps**.
 * Safely constructs subprocess calls using an **argv list (NOT shell strings)**.
 * Supports batch operations, conditional steps, and reusable variables.
@@ -199,6 +200,8 @@ path
 * must_exist: bool
 * multiple: bool
 
+Note: `multiple` is documented in schema but not implemented in current UI collection.
+
 bool
 
 tri_bool
@@ -219,14 +222,14 @@ multichoice
 int
 float
 
-Numeric fields MAY render as sliders when `min` and `max` are present. YAML can provide optional UI hints via `widget: "slider" | "input" | "spinbox"`; unknown keys remain engine-safe (ignored by executor) while UI may use them. If `widget` is omitted, UI chooses the control automatically.
-
-For `float` slider UIs, use integer-backed scaling to avoid precision artifacts: choose `scale = 10^decimals` (for example `step: 0.05` → `scale=100`), keep slider state as integer, and expose value as `int_value/scale`.
-
 secret
 
 * source: inline|env
-* env: NAME
+* env: NAME (used when `source: env`)
+
+Numeric fields MAY render as sliders when `min` and `max` are present. YAML can provide optional UI hints via `widget: "slider" | "input" | "spinbox"`; unknown keys remain engine-safe (ignored by executor) while UI may use them. If `widget` is omitted, UI chooses the control automatically.
+
+For `float` slider UIs, use integer-backed scaling to avoid precision artifacts: choose `scale = 10^decimals` (for example `step: 0.05` → `scale=100`), keep slider state as integer, and expose value as `int_value/scale`.
 
 ---
 
@@ -251,6 +254,8 @@ Requires:
 ```
 item_schema: {...}
 ```
+
+Note: current UI parser validates only that value is a list; `item_schema` is not runtime-enforced.
 
 ---
 
@@ -325,6 +330,39 @@ run:
 ```
 
 Must run with argv list.
+
+---
+
+# 3.8.1 Presets JSON storage
+
+Preset state is stored near YAML as `<yaml>.presets.json`.
+
+Minimal shape:
+
+```json
+{
+  "version": 1,
+  "actions": {
+    "action_id": {
+      "presets": {
+        "preset_name": {
+          "values": {"field": "value"}
+        }
+      },
+      "last_run": {
+        "mode": "snapshot",
+        "values": {"field": "value"}
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+* unknown preset fields are ignored when applying to current form
+* secret fields are not persisted
+* `last_run.mode` is `snapshot` or `preset_ref`
 
 ---
 

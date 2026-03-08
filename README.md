@@ -34,6 +34,50 @@ python main.py --settings app.ini
 - Recovered action status is shown in orange (`recovered`).
 - YAML reload button in UI.
 
+## Documentation
+
+- YAML/engine reference: `docs/yaml_pipeline_reference.md`
+- Architecture/context reference: `docs/context.md`
+
+## Presets JSON (`<yaml>.presets.json`)
+
+Action argument values can be stored and reused via a JSON file placed next to the selected YAML config.
+
+Path rule:
+
+- If config is `workflow.yaml`, presets file is `workflow.yaml.presets.json`.
+
+Behavior:
+
+- Stores named presets per action.
+- Stores last-run state as snapshot or reference to a named preset.
+- Ignores removed/unknown form fields when applying old presets and shows a compatibility warning.
+- Excludes fields with `type: secret` from persisted values.
+
+Minimal file example:
+
+```json
+{
+  "version": 1,
+  "actions": {
+    "build": {
+      "presets": {
+        "smoke": {
+          "values": {
+            "target": "tests",
+            "verbose": true
+          }
+        }
+      },
+      "last_run": {
+        "mode": "preset_ref",
+        "preset_name": "smoke"
+      }
+    }
+  }
+}
+```
+
 
 
 ## on_error demo
