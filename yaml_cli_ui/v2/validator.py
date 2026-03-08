@@ -32,17 +32,17 @@ def _validate_required_sections(doc: V2Document) -> None:
         raise V2ValidationError("v2 document field 'launchers' must be a non-empty mapping")
 
 
-def _validate_name_conflicts(doc: V2Document) -> None:
+def _validate_name_conflicts(_doc: V2Document) -> None:
     """Reserved for future checks of conflicts across callables/import aliases."""
 
 
-def _validate_callable_namespace(doc: V2Document) -> None:
+def _validate_callable_namespace(_doc: V2Document) -> None:
     """Reserved for future callable namespace checks (commands/pipelines/imports)."""
 
 
-def _validate_launchers_shape(doc: V2Document) -> None:
+def _validate_launchers_shape(_doc: V2Document) -> None:
     """Reserved for detailed launcher schema checks."""
 
 
-def _validate_commands_and_pipelines_shape(doc: V2Document) -> None:
+def _validate_commands_and_pipelines_shape(_doc: V2Document) -> None:
     """Reserved for command/pipeline structure checks."""

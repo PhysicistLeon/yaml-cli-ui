@@ -285,14 +285,11 @@ class V2Document:
         return name in self.profiles
 
 
-__all__ = [
-    "ArgvItemKind",
+PUBLIC_API_MODELS = (
     "CommandDef",
     "ErrorContext",
     "ForeachSpec",
-    "ImportDef",
     "LauncherDef",
-    "OnErrorSpec",
     "ParamDef",
     "ParamType",
     "PipelineDef",
@@ -300,9 +297,16 @@ __all__ = [
     "RunContext",
     "RunSpec",
     "SecretSource",
-    "StepKind",
     "StepResult",
     "StepSpec",
     "StepStatus",
     "V2Document",
+)
+
+__all__ = [
+    "ArgvItemKind",
+    "ImportDef",
+    "OnErrorSpec",
+    "StepKind",
+    *PUBLIC_API_MODELS,
 ]

@@ -50,7 +50,7 @@ def test_command_requires_run():
 def test_pipeline_allows_empty_steps_for_scaffold():
     pipeline = PipelineDef(steps=[])
 
-    assert pipeline.steps == []
+    assert not pipeline.steps
 
 
 def test_stepspec_kind_detects_use_and_foreach():

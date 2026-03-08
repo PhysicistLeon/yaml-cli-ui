@@ -1,6 +1,8 @@
 # pylint: disable=import-error
 import importlib
 
+from yaml_cli_ui.v2 import V2Document, load_v2_document, validate_v2_document
+
 
 MODULES = [
     "yaml_cli_ui.v2",
@@ -21,8 +23,6 @@ def test_v2_modules_importable():
 
 
 def test_v2_public_api_exports():
-    from yaml_cli_ui.v2 import V2Document, load_v2_document, validate_v2_document
-
     assert V2Document is not None
     assert callable(load_v2_document)
     assert callable(validate_v2_document)

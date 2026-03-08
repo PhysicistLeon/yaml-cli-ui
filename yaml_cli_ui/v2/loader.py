@@ -35,7 +35,8 @@ def resolve_imports(raw_doc: dict[str, Any], base_dir: Path) -> dict[str, Any]:
 
     if raw_doc.get("imports"):
         raise NotImplementedError(
-            "v2 imports resolution is intentionally deferred in migration scaffold"
+            "v2 imports resolution is intentionally deferred in migration scaffold "
+            f"(base_dir={base_dir})"
         )
     return raw_doc
 
