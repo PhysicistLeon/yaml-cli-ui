@@ -248,7 +248,7 @@ def _context_keys(context: Mapping[str, Any] | Any) -> set[str]:
         return {str(key) for key in context.keys()}
     try:
         return {name for name in dir(context) if not name.startswith("_")}
-    except Exception:  # noqa: BLE001
+    except TypeError:
         return set()
 
 def _get_from_context(context: Mapping[str, Any] | Any, key: str) -> Any:
