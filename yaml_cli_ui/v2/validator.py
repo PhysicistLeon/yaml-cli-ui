@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from .errors import V2ValidationError
+from .expr import extract_local_refs
 from .models import CommandDef, PipelineDef, StepSpec, V2Document
-
-_LOCAL_REF_RE = re.compile(r"\$locals\.([A-Za-z_][A-Za-z0-9_]*)|\$\{locals\.([A-Za-z_][A-Za-z0-9_]*)\}")
-
 
 def validate_v2_document(doc: V2Document) -> None:
     """Validate structural invariants for a loaded v2 document."""
@@ -65,9 +62,7 @@ def _validate_callable_namespace(doc: V2Document) -> None:
 def _extract_local_refs(value: Any) -> set[str]:
     refs: set[str] = set()
     if isinstance(value, str):
-        for match in _LOCAL_REF_RE.finditer(value):
-            refs.add(match.group(1) or match.group(2))
-        return refs
+        return extract_local_refs(value)
     if isinstance(value, dict):
         for key, item in value.items():
             refs.update(_extract_local_refs(key))
