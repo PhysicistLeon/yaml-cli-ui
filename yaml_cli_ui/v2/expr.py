@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ._template_utils import find_closing_brace
 from .errors import V2ExpressionError
 
 _ALLOWED_NAMESPACES = ("params", "locals", "profile", "steps", "run", "loop", "error")
@@ -89,7 +90,7 @@ def extract_local_refs(value: str) -> set[str]:
                 i = end
                 continue
         if value.startswith("${", i):
-            end = _find_template_closing_brace(value, i + 2)
+            end = find_closing_brace(value, i + 2)
             inner = value[i + 2 : end]
             refs.update(_extract_locals_from_expr(inner))
             i = end + 1
@@ -104,28 +105,22 @@ class _SafeEvaluator:
         self._context = context
 
     def evaluate(self, node: ast.AST) -> Any:
-        if isinstance(node, ast.Constant):
-            return node.value
-        if isinstance(node, ast.Name):
-            return self._eval_name(node)
-        if isinstance(node, ast.BoolOp):
-            return self._eval_bool_op(node)
-        if isinstance(node, ast.UnaryOp):
-            return self._eval_unary_op(node)
-        if isinstance(node, ast.Compare):
-            return self._eval_compare(node)
-        if isinstance(node, ast.Attribute):
-            return self._eval_attribute(node)
-        if isinstance(node, ast.Subscript):
-            return self._eval_subscript(node)
-        if isinstance(node, ast.Call):
-            return self._eval_call(node)
-        if isinstance(node, ast.List):
-            return [self.evaluate(item) for item in node.elts]
-        if isinstance(node, ast.Tuple):
-            return tuple(self.evaluate(item) for item in node.elts)
-        if isinstance(node, ast.Dict):
-            return {self.evaluate(k): self.evaluate(v) for k, v in zip(node.keys, node.values)}
+        handlers: tuple[tuple[type[ast.AST], Any], ...] = (
+            (ast.Constant, lambda n: n.value),
+            (ast.Name, self._eval_name),
+            (ast.BoolOp, self._eval_bool_op),
+            (ast.UnaryOp, self._eval_unary_op),
+            (ast.Compare, self._eval_compare),
+            (ast.Attribute, self._eval_attribute),
+            (ast.Subscript, self._eval_subscript),
+            (ast.Call, self._eval_call),
+            (ast.List, lambda n: [self.evaluate(item) for item in n.elts]),
+            (ast.Tuple, lambda n: tuple(self.evaluate(item) for item in n.elts)),
+            (ast.Dict, lambda n: {self.evaluate(k): self.evaluate(v) for k, v in zip(n.keys, n.values)}),
+        )
+        for node_type, handler in handlers:
+            if isinstance(node, node_type):
+                return handler(node)
 
         raise V2ExpressionError(
             f"unsupported AST node '{type(node).__name__}' in expression '{self._expression}'"
@@ -323,35 +318,6 @@ def _read_identifier(value: str, start: int) -> tuple[str, int]:
         idx += 1
     return value[start:idx], idx
 
-
-def _find_template_closing_brace(value: str, start: int) -> int:
-    depth = 1
-    index = start
-    in_string: str | None = None
-    while index < len(value):
-        char = value[index]
-        if in_string:
-            if char == "\\":
-                index += 2
-                continue
-            if char == in_string:
-                in_string = None
-            index += 1
-            continue
-
-        if char in {'"', "'"}:
-            in_string = char
-            index += 1
-            continue
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return index
-        index += 1
-
-    raise V2ExpressionError(f"unterminated template expression in '{value}'")
 
 
 def _extract_locals_from_expr(expression: str) -> set[str]:

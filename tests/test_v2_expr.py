@@ -9,6 +9,7 @@ import pytest
 
 from yaml_cli_ui.v2.errors import V2ExpressionError
 from yaml_cli_ui.v2.expr import evaluate_expression, extract_local_refs, resolve_name
+from tests.v2_context import build_v2_context
 
 
 @dataclass
@@ -16,28 +17,13 @@ class Box:
     value: int
 
 
+
 def _ctx(tmp_path: Path):
-    return {
-        "params": {
-            "source_url": "https://example.com",
-            "collection": "incoming",
-            "mode": "video",
-            "jobs": [{"source_url": "a"}, {"source_url": "b"}],
-            "count": 5,
-            "max_items": 10,
-            "box": Box(value=9),
-        },
-        "locals": {
-            "urls_file": str(tmp_path / "urls.json"),
-            "run_root": "/tmp/run_1",
-            "empty_list": [],
-        },
-        "profile": {"workdir": "/work"},
-        "run": {"id": "run_123"},
-        "steps": {"scrape": {"stdout": "ok", "exit_code": 0}, "per_job": {"iterations": [1, 2]}},
-        "loop": {"index": 0},
-        "error": {"message": "boom"},
-    }
+    ctx = build_v2_context(tmp_path)
+    ctx["params"]["box"] = Box(value=9)
+    ctx["locals"]["empty_list"] = []
+    ctx["steps"]["per_job"] = {"iterations": [1, 2]}
+    return ctx
 
 
 def test_evaluate_basic_boolean(tmp_path: Path):

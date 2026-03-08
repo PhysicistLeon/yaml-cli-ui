@@ -8,29 +8,14 @@ import pytest
 
 from yaml_cli_ui.v2.errors import V2ExpressionError
 from yaml_cli_ui.v2.renderer import render_scalar_or_ref, render_string, render_value
+from tests.v2_context import build_v2_context
+
 
 
 def _ctx(tmp_path: Path):
-    return {
-        "params": {
-            "source_url": "https://example.com",
-            "collection": "incoming",
-            "mode": "video",
-            "jobs": [{"source_url": "a"}, {"source_url": "b"}],
-            "count": 5,
-            "max_items": 10,
-            "none_value": None,
-        },
-        "locals": {
-            "urls_file": str(tmp_path / "urls.json"),
-            "run_root": "/tmp/run_1",
-        },
-        "profile": {"workdir": "/work"},
-        "run": {"id": "run_123"},
-        "steps": {"scrape": {"stdout": "ok", "exit_code": 0}},
-        "loop": {"index": 0},
-        "error": {"message": "boom"},
-    }
+    ctx = build_v2_context(tmp_path)
+    ctx["params"]["none_value"] = None
+    return ctx
 
 
 def test_render_value_passthrough_non_string(tmp_path: Path):

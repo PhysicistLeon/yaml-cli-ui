@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .errors import V2ExpressionError
+from ._template_utils import find_closing_brace
 from .expr import evaluate_expression
 
 
@@ -49,7 +49,7 @@ def render_string(template: str, context: Mapping[str, Any] | Any) -> str:
             i += 2
             continue
         if template.startswith("${", i):
-            end = _find_closing_brace(template, i + 2)
+            end = find_closing_brace(template, i + 2)
             expr = template[i + 2 : end]
             out.append(_stringify_value(evaluate_expression(expr, context)))
             i = end + 1
@@ -96,36 +96,6 @@ def _read_ref_token(value: str, start: int) -> tuple[str, int]:
         break
     return value[start:i], i
 
-
-def _find_closing_brace(value: str, start: int) -> int:
-    depth = 1
-    i = start
-    in_string: str | None = None
-
-    while i < len(value):
-        char = value[i]
-        if in_string:
-            if char == "\\":
-                i += 2
-                continue
-            if char == in_string:
-                in_string = None
-            i += 1
-            continue
-
-        if char in {'"', "'"}:
-            in_string = char
-            i += 1
-            continue
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return i
-        i += 1
-
-    raise V2ExpressionError(f"unterminated template expression in '{value}'")
 
 
 def _stringify_value(value: Any) -> str:
