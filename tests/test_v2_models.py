@@ -30,6 +30,16 @@ def test_v2_document_callables_merges_commands_and_pipelines():
     assert doc.callables() == {"cmd": command, "pipe": pipeline}
 
 
+def test_v2_document_callables_rejects_name_conflicts():
+    doc = V2Document(
+        commands={"shared": CommandDef(run=RunSpec(program="python"))},
+        pipelines={"shared": PipelineDef(steps=[])},
+    )
+
+    with pytest.raises(ValueError, match="namespace conflict"):
+        doc.callables()
+
+
 def test_launcher_requires_title_and_use():
     with pytest.raises(ValueError, match="title"):
         LauncherDef(title="", use="x")
@@ -63,6 +73,19 @@ def test_stepspec_kind_detects_use_and_foreach():
     assert use_step.is_use_step is True
     assert foreach_step.kind == StepKind.FOREACH
     assert foreach_step.is_foreach_step is True
+
+
+def test_stepspec_requires_exactly_one_mode():
+    with pytest.raises(ValueError, match="exactly one"):
+        StepSpec()
+
+    with pytest.raises(ValueError, match="exactly one"):
+        StepSpec(use="commands.hello", foreach=ForeachSpec(in_expr=[1], as_name="x", steps=["a"]))
+
+
+def test_stepspec_rejects_empty_use_when_provided():
+    with pytest.raises(ValueError, match="non-empty"):
+        StepSpec(use="")
 
 
 def test_foreach_requires_as_name_and_non_empty_steps():

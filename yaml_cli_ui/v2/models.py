@@ -147,11 +147,21 @@ class StepSpec:
     with_values: dict[str, Any] = field(default_factory=dict)
     foreach: ForeachSpec | None = None
 
+    def __post_init__(self) -> None:
+        has_use = self.use is not None
+        has_foreach = self.foreach is not None
+
+        if has_use and isinstance(self.use, str) and not self.use.strip():
+            raise ValueError("StepSpec.use must be a non-empty string when provided")
+
+        if has_use == has_foreach:
+            raise ValueError("StepSpec must define exactly one of 'use' or 'foreach'")
+
     @property
     def kind(self) -> StepKind | None:
         """Infer step kind from populated fields."""
 
-        has_use = bool(self.use)
+        has_use = self.use is not None
         has_foreach = self.foreach is not None
         if has_use and not has_foreach:
             return StepKind.USE
@@ -277,6 +287,13 @@ class V2Document:
     def callables(self) -> dict[str, CommandDef | PipelineDef]:
         """Return merged callable namespace: commands + pipelines."""
 
+        conflicts = set(self.commands).intersection(self.pipelines)
+        if conflicts:
+            conflict_list = ", ".join(sorted(conflicts))
+            raise ValueError(
+                "V2Document callable namespace conflict between commands and pipelines: "
+                f"{conflict_list}"
+            )
         return {**self.commands, **self.pipelines}
 
     def has_profile(self, name: str) -> bool:
