@@ -1,27 +1,36 @@
-"""Single-command executor for YAML CLI UI v2.
+"""Execution engine for YAML CLI UI v2 commands and pipelines.
 
 Minimal EBNF for this step:
 
-CommandExecution :=
-  if when == false -> skipped result
-  else
-    resolve program
-    serialize argv
-    resolve workdir
-    build env
-    execute subprocess
-    collect stdout/stderr/exit_code/timing
-    map to StepResult
+PipelineExecution :=
+  Step*
 
-StdStreamMode :=
-    "capture"
-  | "inherit"
-  | "file:" path
+Step :=
+  ShortCallableRef
+| ExpandedUseStep
+| ForeachStep
 
-ResultStatus :=
-    success
-  | failed
-  | skipped
+ShortCallableRef :=
+  callable_name
+
+ExpandedUseStep :=
+  ["step": string]
+  ["when": value]
+  ["continue_on_error": bool]
+  "use": callable_name
+  ["with": map]
+
+ForeachStep :=
+  ["step": string]
+  ["when": value]
+  ["continue_on_error": bool]
+  "foreach":
+    "in": value
+    "as": string
+    "steps": Step*
+
+OnError :=
+  "steps": Step*
 """
 
 from __future__ import annotations
@@ -36,8 +45,18 @@ from typing import Any, Mapping
 from .argv import serialize_argv
 from .errors import V2ExecutionError
 from .expr import evaluate_expression
-from .models import CommandDef, ErrorContext, RunSpec, StepResult, StepStatus
-from .renderer import render_scalar_or_ref, render_string
+from .models import (
+    CommandDef,
+    ErrorContext,
+    OnErrorSpec,
+    PipelineDef,
+    RunSpec,
+    StepResult,
+    StepSpec,
+    StepStatus,
+    V2Document,
+)
+from .renderer import render_scalar_or_ref, render_value
 
 
 def resolve_program(program: str, context: Mapping[str, Any]) -> str:
@@ -90,13 +109,32 @@ def build_process_env(run_spec: RunSpec, context: Mapping[str, Any]) -> dict[str
     return merged
 
 
+def resolve_callable(doc: V2Document, callable_name: str) -> CommandDef | PipelineDef:
+    """Resolve local or imported callable by name."""
+
+    if "." in callable_name:
+        alias, nested_name = callable_name.split(".", 1)
+        if not alias or not nested_name:
+            raise V2ExecutionError(f"invalid callable name '{callable_name}'")
+        imported_doc = doc.imported_documents.get(alias)
+        if imported_doc is None:
+            raise V2ExecutionError(f"unknown import alias '{alias}' in callable '{callable_name}'")
+        return resolve_callable(imported_doc, nested_name)
+
+    callable_obj = doc.callables().get(callable_name)
+    if callable_obj is None:
+        raise V2ExecutionError(f"callable '{callable_name}' not found")
+    return callable_obj
+
+
 def execute_command_def(
     command: CommandDef,
     *,
     context: Mapping[str, Any],
     step_name: str | None = None,
+    doc: V2Document | None = None,
 ) -> StepResult:
-    """Execute a single command definition and return normalized step result."""
+    """Execute command and apply command-level on_error semantics."""
 
     name = step_name or command.title or "command"
     if command.when is not None and not _evaluate_when(command.when, context):
@@ -113,7 +151,320 @@ def execute_command_def(
             meta={"reason": "when=false"},
         )
 
-    return execute_run_spec(command.run, context=context, step_name=name)
+    result = execute_run_spec(command.run, context=context, step_name=name)
+    if result.status != StepStatus.FAILED or command.on_error is None:
+        return result
+
+    error_context = make_error_context(result, owner_name=name)
+    recovery = execute_on_error(
+        command.on_error,
+        doc=doc or _context_doc(context),
+        context=context,
+        error_context=_error_context_to_mapping(error_context) or {},
+        owner_name=name,
+    )
+    if recovery.status in (StepStatus.SUCCESS, StepStatus.SKIPPED, StepStatus.RECOVERED):
+        result.status = StepStatus.RECOVERED
+        result.meta["on_error"] = recovery
+        return result
+
+    result.meta["recovery_error"] = _error_context_to_mapping(recovery.error)
+    result.error = ErrorContext(
+        type="command_recovery_failed",
+        message=f"command failed and on_error recovery failed for '{name}'",
+        step=name,
+        exit_code=result.exit_code,
+    )
+    result.meta["on_error"] = recovery
+    return result
+
+
+def execute_pipeline_def(
+    pipeline: PipelineDef,
+    *,
+    doc: V2Document,
+    context: Mapping[str, Any],
+    step_name: str | None = None,
+) -> StepResult:
+    """Execute pipeline sequentially and aggregate step results."""
+
+    name = step_name or pipeline.title or "pipeline"
+    started_at = _utcnow()
+    start_perf = perf_counter()
+
+    if pipeline.when is not None and not _evaluate_when(pipeline.when, context):
+        return StepResult(
+            name=name,
+            status=StepStatus.SKIPPED,
+            exit_code=None,
+            stdout=None,
+            stderr=None,
+            duration_ms=0,
+            started_at=started_at,
+            finished_at=started_at,
+            children={},
+            meta={"reason": "when=false"},
+        )
+
+    children: dict[str, StepResult] = {}
+    pipeline_steps = _copy_steps_mapping(context)
+    generated_index = 0
+    hard_failure: StepResult | None = None
+    had_soft_failures = False
+
+    for raw_step in pipeline.steps:
+        step_context = make_child_steps_mapping(context, pipeline_steps)
+        step_result = execute_step(
+            raw_step,
+            doc=doc,
+            context=step_context,
+            generated_name_index=generated_index,
+        )
+        generated_index += 1
+
+        if step_result.name in children:
+            step_result.name = _make_unique_step_name(step_result.name, children)
+
+        children[step_result.name] = step_result
+        pipeline_steps[step_result.name] = _step_result_to_context(step_result)
+
+        if step_result.status != StepStatus.FAILED:
+            continue
+
+        effective_continue = _step_continue_on_error(raw_step, doc) or pipeline.continue_on_error
+        if effective_continue:
+            had_soft_failures = True
+            continue
+
+        hard_failure = step_result
+        break
+
+    duration = _duration_ms(start_perf)
+    finished_at = _utcnow()
+
+    if hard_failure is not None:
+        base_result = StepResult(
+            name=name,
+            status=StepStatus.FAILED,
+            duration_ms=duration,
+            started_at=started_at,
+            finished_at=finished_at,
+            children=children,
+            error=make_error_context(hard_failure, owner_name=name),
+            meta={},
+        )
+        if pipeline.on_error is not None:
+            recovery = execute_on_error(
+                pipeline.on_error,
+                doc=doc,
+                context=make_child_steps_mapping(context, pipeline_steps),
+                error_context=_error_context_to_mapping(base_result.error),
+                owner_name=name,
+            )
+            base_result.meta["on_error"] = recovery
+            if recovery.status in (StepStatus.SUCCESS, StepStatus.SKIPPED, StepStatus.RECOVERED):
+                base_result.status = StepStatus.RECOVERED
+            else:
+                base_result.meta["recovery_error"] = _error_context_to_mapping(recovery.error)
+                base_result.error = ErrorContext(
+                    type="pipeline_recovery_failed",
+                    message=f"pipeline failed and on_error recovery failed for '{name}'",
+                    step=hard_failure.name,
+                    exit_code=hard_failure.exit_code,
+                )
+        return base_result
+
+    status = StepStatus.FAILED if had_soft_failures else StepStatus.SUCCESS
+    return StepResult(
+        name=name,
+        status=status,
+        duration_ms=duration,
+        started_at=started_at,
+        finished_at=finished_at,
+        children=children,
+        meta={},
+    )
+
+
+def execute_step(
+    step: str | StepSpec,
+    *,
+    doc: V2Document,
+    context: Mapping[str, Any],
+    generated_name_index: int = 0,
+) -> StepResult:
+    """Execute one pipeline step entry."""
+
+    normalized = normalize_step_spec(step)
+    children = _copy_steps_mapping(context)
+
+    if isinstance(normalized, str):
+        callable_name = normalized
+        step_name = _deduce_step_name(callable_name, generated_name_index, children)
+        return execute_callable_name(callable_name, doc=doc, context=context, step_name=step_name)
+
+    if normalized.when is not None and not _evaluate_when(normalized.when, context):
+        timestamp = _utcnow()
+        return StepResult(
+            name=normalized.step or _generated_step_name(generated_name_index),
+            status=StepStatus.SKIPPED,
+            duration_ms=0,
+            started_at=timestamp,
+            finished_at=timestamp,
+            meta={"reason": "when=false"},
+        )
+
+    if normalized.is_foreach_step:
+        step_name = normalized.step or _generated_step_name(generated_name_index)
+        foreach_result = execute_foreach_step(normalized, doc=doc, context=context)
+        foreach_result.name = step_name
+        return foreach_result
+
+    if not normalized.use:
+        raise V2ExecutionError("expanded step must define 'use'")
+
+    step_name = normalized.step or _deduce_step_name(normalized.use, generated_name_index, children)
+    step_context = _with_short_bindings(context, normalized.with_values)
+    return execute_callable_name(normalized.use, doc=doc, context=step_context, step_name=step_name)
+
+
+def execute_foreach_step(
+    step: StepSpec,
+    *,
+    doc: V2Document,
+    context: Mapping[str, Any],
+) -> StepResult:
+    """Execute foreach block as per-iteration nested pipeline."""
+
+    if step.foreach is None:
+        raise V2ExecutionError("execute_foreach_step expects step.foreach")
+
+    started_at = _utcnow()
+    start_perf = perf_counter()
+
+    items = render_value(step.foreach.in_expr, context)
+    if not isinstance(items, list):
+        raise V2ExecutionError("foreach.in must evaluate to a list")
+
+    iteration_children: dict[str, StepResult] = {}
+    success_count = 0
+    failed_count = 0
+
+    for index, item in enumerate(items):
+        loop_ctx = {
+            "index": index,
+            "first": index == 0,
+            "last": index == len(items) - 1,
+        }
+        iteration_context = dict(context)
+        iteration_context[step.foreach.as_name] = item
+        iteration_context["loop"] = loop_ctx
+        iteration_result = execute_pipeline_def(
+            PipelineDef(steps=list(step.foreach.steps)),
+            doc=doc,
+            context=iteration_context,
+            step_name=f"iter_{index}",
+        )
+        iteration_children[f"iter_{index}"] = iteration_result
+
+        if iteration_result.status == StepStatus.FAILED:
+            failed_count += 1
+        else:
+            success_count += 1
+
+    status = StepStatus.FAILED if failed_count else StepStatus.SUCCESS
+    return StepResult(
+        name=step.step or "foreach",
+        status=status,
+        duration_ms=_duration_ms(start_perf),
+        started_at=started_at,
+        finished_at=_utcnow(),
+        children=iteration_children,
+        meta={
+            "iteration_count": len(items),
+            "success_count": success_count,
+            "failed_count": failed_count,
+        },
+    )
+
+
+def execute_on_error(
+    on_error: OnErrorSpec,
+    *,
+    doc: V2Document,
+    context: Mapping[str, Any],
+    error_context: Mapping[str, Any],
+    owner_name: str,
+) -> StepResult:
+    """Execute on_error fallback steps in error-aware context."""
+
+    recovery_context = dict(context)
+    recovery_context["error"] = dict(error_context)
+    recovery = execute_pipeline_def(
+        PipelineDef(steps=list(on_error.steps)),
+        doc=doc,
+        context=recovery_context,
+        step_name=f"{owner_name}__on_error",
+    )
+    if recovery.status == StepStatus.SUCCESS:
+        recovery.status = StepStatus.RECOVERED
+    return recovery
+
+
+def execute_callable_name(
+    callable_name: str,
+    *,
+    doc: V2Document,
+    context: Mapping[str, Any],
+    step_name: str,
+) -> StepResult:
+    """Execute resolved callable (command or pipeline)."""
+
+    callable_def = resolve_callable(doc, callable_name)
+    if isinstance(callable_def, CommandDef):
+        return execute_command_def(callable_def, context=context, step_name=step_name, doc=doc)
+    return execute_pipeline_def(callable_def, doc=doc, context=context, step_name=step_name)
+
+
+def normalize_step_spec(step: str | StepSpec) -> str | StepSpec:
+    """Validate supported step shape in execution phase."""
+
+    if isinstance(step, str):
+        if not step.strip():
+            raise V2ExecutionError("step callable name must be non-empty")
+        return step
+    if isinstance(step, StepSpec):
+        return step
+    raise V2ExecutionError(f"unsupported step type: {type(step).__name__}")
+
+
+def make_error_context(result: StepResult, *, owner_name: str) -> ErrorContext:
+    """Build error context from a failed result."""
+
+    if result.error is not None:
+        return ErrorContext(
+            type=result.error.type,
+            message=result.error.message,
+            step=result.name,
+            exit_code=result.error.exit_code,
+        )
+    return ErrorContext(
+        type="execution_failed",
+        message=f"step '{result.name}' failed in '{owner_name}'",
+        step=result.name,
+        exit_code=result.exit_code,
+    )
+
+
+def make_child_steps_mapping(
+    context: Mapping[str, Any],
+    steps_mapping: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return context copy with updated $steps namespace."""
+
+    child = dict(context)
+    child["steps"] = dict(steps_mapping)
+    return child
 
 
 def execute_run_spec(
@@ -194,13 +545,13 @@ def execute_run_spec(
     )
 
 
-
 def _evaluate_when(when: Any, context: Mapping[str, Any]) -> bool:
     if isinstance(when, str):
         stripped = when.strip()
         if stripped.startswith("${") and stripped.endswith("}"):
             return bool(evaluate_expression(stripped, context))
     return bool(render_scalar_or_ref(when, context))
+
 
 def _merge_env_map(
     merged: dict[str, str],
@@ -237,7 +588,7 @@ def _parse_stream_mode(
     if mode in ("capture", "inherit"):
         return mode, None
     if mode.startswith("file:"):
-        rendered = render_string(mode[5:], context)
+        rendered = render_scalar_or_ref(mode[5:], context)
         if not isinstance(rendered, str) or not rendered:
             raise V2ExecutionError(f"{stream_name} file path must render to non-empty string")
         return "file", rendered
@@ -275,6 +626,86 @@ def _timeout_partial_output(raw: Any, mode: str) -> str | None:
     return str(raw)
 
 
+def _with_short_bindings(context: Mapping[str, Any], with_values: Mapping[str, Any]) -> dict[str, Any]:
+    rendered = {key: render_value(value, context) for key, value in with_values.items()}
+    merged = dict(context)
+    bindings = dict(context.get("bindings", {})) if isinstance(context.get("bindings"), Mapping) else {}
+    bindings.update(rendered)
+    merged["bindings"] = bindings
+    return merged
+
+
+def _step_continue_on_error(step: str | StepSpec, doc: V2Document) -> bool:
+    if isinstance(step, StepSpec):
+        if step.continue_on_error:
+            return True
+        if step.use:
+            callable_def = resolve_callable(doc, step.use)
+            if isinstance(callable_def, (CommandDef, PipelineDef)):
+                return bool(callable_def.continue_on_error)
+        return False
+
+    callable_def = resolve_callable(doc, step)
+    if isinstance(callable_def, (CommandDef, PipelineDef)):
+        return bool(callable_def.continue_on_error)
+    return False
+
+
+def _context_doc(context: Mapping[str, Any]) -> V2Document:
+    doc = context.get("_doc")
+    if not isinstance(doc, V2Document):
+        raise V2ExecutionError("internal context is missing '_doc' document reference")
+    return doc
+
+
+def _copy_steps_mapping(context: Mapping[str, Any]) -> dict[str, Any]:
+    raw = context.get("steps", {})
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _deduce_step_name(callable_name: str, generated_name_index: int, children: Mapping[str, Any]) -> str:
+    base = callable_name.rsplit(".", 1)[-1] if "." in callable_name else callable_name
+    if not base:
+        base = _generated_step_name(generated_name_index)
+    return _make_unique_step_name(base, children)
+
+
+def _generated_step_name(index: int) -> str:
+    return f"step_{index + 1}"
+
+
+def _make_unique_step_name(base: str, existing: Mapping[str, Any]) -> str:
+    if base not in existing:
+        return base
+    suffix = 2
+    while f"{base}_{suffix}" in existing:
+        suffix += 1
+    return f"{base}_{suffix}"
+
+
+def _step_result_to_context(result: StepResult) -> dict[str, Any]:
+    return {
+        "status": result.status.value,
+        "exit_code": result.exit_code,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "duration_ms": result.duration_ms,
+        "error": _error_context_to_mapping(result.error),
+        "meta": dict(result.meta),
+    }
+
+
+def _error_context_to_mapping(error: ErrorContext | None) -> dict[str, Any] | None:
+    if error is None:
+        return None
+    return {
+        "type": error.type,
+        "message": error.message,
+        "step": error.step,
+        "exit_code": error.exit_code,
+    }
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -287,7 +718,12 @@ EXECUTOR_PUBLIC_API = (
     "resolve_program",
     "resolve_workdir",
     "build_process_env",
+    "resolve_callable",
     "execute_command_def",
+    "execute_pipeline_def",
+    "execute_step",
+    "execute_foreach_step",
+    "execute_on_error",
     "execute_run_spec",
 )
 

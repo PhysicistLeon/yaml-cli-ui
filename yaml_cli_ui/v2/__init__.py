@@ -15,7 +15,12 @@ from .executor import (
     EXECUTOR_PUBLIC_API as _EXECUTOR_PUBLIC_API,
     build_process_env as _build_process_env,
     execute_command_def as _execute_command_def,
+    execute_foreach_step as _execute_foreach_step,
+    execute_on_error as _execute_on_error,
+    execute_pipeline_def as _execute_pipeline_def,
     execute_run_spec as _execute_run_spec,
+    execute_step as _execute_step,
+    resolve_callable as _resolve_callable,
     resolve_program as _resolve_program,
     resolve_workdir as _resolve_workdir,
 )
@@ -47,6 +52,11 @@ resolve_workdir = _resolve_workdir
 build_process_env = _build_process_env
 execute_command_def = _execute_command_def
 execute_run_spec = _execute_run_spec
+resolve_callable = _resolve_callable
+execute_pipeline_def = _execute_pipeline_def
+execute_step = _execute_step
+execute_foreach_step = _execute_foreach_step
+execute_on_error = _execute_on_error
 
 # Keep direct references so linters treat model re-exports as used symbols.
 _EXPORTED_MODEL_SYMBOLS = (
