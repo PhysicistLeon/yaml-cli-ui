@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import configparser
 import json
 import os
 import re
@@ -26,7 +25,8 @@ from .engine import (
     validate_config,
 )
 from .presets import PresetError, PresetService
-
+from .settings import load_launch_settings
+from .bootstrap import detect_yaml_version, open_app_for_config
 
 from .ui.status import (
     FAILED_COLOR,
@@ -105,37 +105,6 @@ A: Лучше использовать поля secret c source: env и пере
 Q: Почему не открывается файл из Browse?
 A: Проверьте browse_dir в app.ini, права доступа и существование директории/файла.
 """
-
-
-def _resolve_ini_path(value: str, ini_path: Path) -> Path:
-    candidate = Path(value).expanduser()
-    if not candidate.is_absolute():
-        candidate = (ini_path.parent / candidate).resolve()
-    return candidate
-
-
-def load_launch_settings(ini_path: str | None) -> dict[str, Path | None]:
-    settings: dict[str, Path | None] = {"default_yaml": None, "browse_dir": None}
-    if not ini_path:
-        return settings
-
-    config = configparser.ConfigParser()
-    parsed = config.read(ini_path, encoding="utf-8")
-    if not parsed:
-        raise FileNotFoundError(f"Settings file was not found: {ini_path}")
-
-    resolved_ini_path = Path(parsed[0]).resolve()
-    ui_section = config["ui"] if config.has_section("ui") else {}
-
-    default_yaml = str(ui_section.get("default_yaml", "")).strip()
-    if default_yaml:
-        settings["default_yaml"] = _resolve_ini_path(default_yaml, resolved_ini_path)
-
-    browse_dir = str(ui_section.get("browse_dir", "")).strip()
-    if browse_dir:
-        settings["browse_dir"] = _resolve_ini_path(browse_dir, resolved_ini_path)
-
-    return settings
 
 
 def _decimal_places(value: Any) -> int:
@@ -554,6 +523,15 @@ class App(tk.Tk):
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
+            if detect_yaml_version(self.config_path) != 1:
+                replacement = open_app_for_config(
+                    self.config_path,
+                    browse_dir=self.browse_dir,
+                )
+                self.destroy()
+                replacement.mainloop()
+                return
+
             self.preset_service = PresetService(self.config_path)
             self.app_config = yaml.safe_load(
                 self.config_path.read_text(encoding="utf-8")

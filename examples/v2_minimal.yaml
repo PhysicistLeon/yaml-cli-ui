@@ -1,0 +1,19 @@
+version: 2
+
+profiles:
+  local:
+    runtimes:
+      python: "python"
+
+commands:
+  hello_command:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('hello from v2')"
+
+launchers:
+  hello:
+    title: Hello v2
+    use: hello_command
