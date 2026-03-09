@@ -554,8 +554,10 @@ class App(tk.Tk):
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
-            from .bootstrap import detect_yaml_version, open_app_for_config
-
+            from .bootstrap import (
+                detect_yaml_version,
+                open_app_for_config,
+            )  # pylint: disable=import-outside-toplevel
             if detect_yaml_version(self.config_path) != 1:
                 replacement = open_app_for_config(
                     self.config_path,

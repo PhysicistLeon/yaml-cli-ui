@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from .app import App, DEFAULT_CONFIG_PATH, load_launch_settings
-from .app_v2 import AppV2
+from .app import DEFAULT_CONFIG_PATH, load_launch_settings
+
+if TYPE_CHECKING:
+    from .app import App
+    from .app_v2 import AppV2
 
 SUPPORTED_CONFIG_VERSIONS = {1, 2}
 
@@ -69,6 +72,9 @@ def detect_yaml_version(path: str | Path) -> int:
 
 
 def select_app_class_for_version(version: int) -> type[object]:
+    from .app import App
+    from .app_v2 import AppV2
+
     if version == 1:
         return App
     if version == 2:
@@ -85,6 +91,9 @@ def open_app_for_config(
     root: Any | None = None,
     browse_dir: str | Path | None = None,
 ) -> object:
+    from .app import App
+    from .app_v2 import AppV2
+
     del root  # Reserved for future tiny glue if embedding root is needed.
 
     config_path = _as_path(path)
@@ -98,7 +107,11 @@ def open_app_for_config(
 
     if app_class is App:
         return App(str(config_path), browse_dir=resolved_browse_dir)
-    return AppV2(str(config_path))
+    if app_class is AppV2:
+        return AppV2(str(config_path))
+    raise UnsupportedConfigVersionError(
+        f"Unsupported config version {version}; supported versions: 1, 2"
+    )
 
 
 def resolve_launch_config(
@@ -123,7 +136,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    config_path, browse_dir = resolve_launch_config(args.config, settings_path=args.settings)
+    config_path, browse_dir = resolve_launch_config(
+        args.config,
+        settings_path=args.settings,
+    )
     app = open_app_for_config(
         config_path,
         settings_path=args.settings,

@@ -1,3 +1,4 @@
+# pylint: disable=import-error
 from __future__ import annotations
 
 from pathlib import Path
@@ -80,8 +81,8 @@ def test_open_app_for_config_routes_v1(tmp_path: Path, monkeypatch):
         def __init__(self, *args, **kwargs):
             calls.append(("v2", args, kwargs))
 
-    monkeypatch.setattr("yaml_cli_ui.bootstrap.App", DummyV1)
-    monkeypatch.setattr("yaml_cli_ui.bootstrap.AppV2", DummyV2)
+    monkeypatch.setattr("yaml_cli_ui.app.App", DummyV1)
+    monkeypatch.setattr("yaml_cli_ui.app_v2.AppV2", DummyV2)
 
     open_app_for_config(cfg, browse_dir=tmp_path)
 
@@ -104,8 +105,8 @@ def test_open_app_for_config_routes_v2(tmp_path: Path, monkeypatch):
         def __init__(self, *args, **kwargs):
             calls.append(("v2", args, kwargs))
 
-    monkeypatch.setattr("yaml_cli_ui.bootstrap.App", DummyV1)
-    monkeypatch.setattr("yaml_cli_ui.bootstrap.AppV2", DummyV2)
+    monkeypatch.setattr("yaml_cli_ui.app.App", DummyV1)
+    monkeypatch.setattr("yaml_cli_ui.app_v2.AppV2", DummyV2)
 
     open_app_for_config(cfg)
 

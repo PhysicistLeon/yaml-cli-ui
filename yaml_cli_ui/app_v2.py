@@ -26,6 +26,7 @@ from typing import Any
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
+from .app import load_launch_settings
 from .ui.form_widgets import apply_values_to_v2_form, collect_v2_form_values, create_v2_form_fields
 from .ui.history import RunHistoryStore
 from .ui.log_views import map_step_status, render_step_result_text
@@ -144,8 +145,10 @@ class AppV2(tk.Tk):
 
     def reload(self) -> None:
         path = Path(self.path_var.get()).expanduser()
-        from .bootstrap import detect_yaml_version, open_app_for_config
-
+        from .bootstrap import (
+            detect_yaml_version,
+            open_app_for_config,
+        )  # pylint: disable=import-outside-toplevel
         if detect_yaml_version(path) != 2:
             replacement = open_app_for_config(path)
             self.destroy()
@@ -448,8 +451,6 @@ def main() -> None:
     args = parser.parse_args()
 
     # Reuse existing settings parser for compatibility with app.ini files.
-    from .app import load_launch_settings
-
     settings = load_launch_settings(args.settings)
     default_config = settings["default_yaml"] or Path(DEFAULT_CONFIG_PATH)
     config_path = Path(args.config) if args.config else default_config
