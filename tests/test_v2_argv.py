@@ -13,8 +13,8 @@ from yaml_cli_ui.v2.argv import (
 from yaml_cli_ui.v2.errors import V2ExecutionError, V2ValidationError
 
 
-@pytest.fixture
-def context() -> dict:
+@pytest.fixture(name="context")
+def _context_fixture() -> dict:
     return {
         "params": {
             "source_url": "https://example.com/video",
