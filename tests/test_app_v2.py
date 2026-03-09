@@ -4,8 +4,20 @@ import tkinter as tk
 
 import pytest
 
-from yaml_cli_ui.app_v2 import AppV2, run_launcher
+from yaml_cli_ui.app_v2 import (
+    AppV2,
+    launcher_param_plan,
+    resolve_profile_ui_state,
+    run_launcher,
+)
 from yaml_cli_ui.v2.loader import load_v2_document
+from yaml_cli_ui.v2.models import (
+    LauncherDef,
+    ParamDef,
+    ParamType,
+    ProfileDef,
+    V2Document,
+)
 
 
 @pytest.fixture()
@@ -55,6 +67,37 @@ def _maybe_app(path):
     return app
 
 
+def test_resolve_profile_ui_state():
+    doc_none = V2Document(profiles={})
+    assert resolve_profile_ui_state(doc_none) == (False, None, [])
+
+    doc_one = V2Document(profiles={"only": ProfileDef()})
+    assert resolve_profile_ui_state(doc_one) == (False, "only", ["only"])
+
+    doc_many = V2Document(profiles={"a": ProfileDef(), "b": ProfileDef()})
+    show, selected, names = resolve_profile_ui_state(doc_many)
+    assert show is True
+    assert selected == "a"
+    assert names == ["a", "b"]
+
+
+def test_launcher_param_plan_with_fixed_bindings():
+    doc = V2Document(
+        params={
+            "x": ParamDef(type=ParamType.STRING),
+            "y": ParamDef(type=ParamType.STRING),
+        },
+        launchers={
+            "l": LauncherDef(title="L", use="c", with_values={"y": "fixed"}),
+        },
+    )
+
+    editable, fixed = launcher_param_plan(doc, "l")
+
+    assert set(editable.keys()) == {"x"}
+    assert fixed == {"y": "fixed"}
+
+
 def test_run_launcher_executes(v2_yaml):
     doc = load_v2_document(v2_yaml)
 
@@ -90,6 +133,58 @@ def test_background_completion_updates_history_and_logs(v2_yaml):
         rec = list(app.history.records.values())[-1]
         assert rec.status == "success"
         assert "run_hello" in app.log_widgets["__all__"].get("1.0", "end")
-        assert app.status_labels["run_hello"].cget("text") == "success"
+        assert "success" in app.status_labels["run_hello"].cget("text")
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_autorun_when_all_editable_ready(tmp_path, monkeypatch):
+    path = tmp_path / "auto.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  env_secret:
+    type: secret
+    required: true
+    source: env
+    env: MY_ENV_SECRET
+  d:
+    type: string
+    default: hello
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MY_ENV_SECRET", "s3cr3t")
+    app = _maybe_app(path)
+    try:
+        calls: list[dict[str, str]] = []
+
+        def fake_exec(name, values):
+            calls.append({"name": name, "values": values})
+
+        app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        app.start_launcher("l")
+        assert calls == [{"name": "l", "values": {}}]
+    finally:
+        app.destroy()
+
+
+def test_reload_does_not_duplicate_launcher_tabs(v2_yaml):
+    app = _maybe_app(v2_yaml)
+    try:
+        app.reload()
+        app.reload()
+        tab_count = len(app.output_notebook.tabs())
+        assert tab_count == 2  # All runs + run_hello
     finally:
         app.destroy()

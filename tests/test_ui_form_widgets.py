@@ -1,6 +1,9 @@
-import os
-
-from yaml_cli_ui.ui.form_widgets import FormField, apply_values_to_v2_form, collect_v2_form_values
+from yaml_cli_ui.ui.form_widgets import (
+    FormField,
+    _display_fixed_value,
+    apply_values_to_v2_form,
+    collect_v2_form_values,
+)
 from yaml_cli_ui.v2.models import ParamDef, ParamType, SecretSource
 
 
@@ -86,7 +89,7 @@ def test_collect_values_and_required_validation(monkeypatch, tmp_path):
         ),
         "token": FormField(
             "token",
-            ParamDef(type=ParamType.SECRET, source=SecretSource.ENV, env="MY_SECRET"),
+            ParamDef(type=ParamType.SECRET, required=True, source=SecretSource.ENV, env="MY_SECRET"),
             Entry("ignored"),
         ),
     }
@@ -98,6 +101,42 @@ def test_collect_values_and_required_validation(monkeypatch, tmp_path):
     assert values["flag"] is True
     assert values["multi"] == ["b"]
     assert values["token"] == "env-secret"
+
+
+def test_collect_values_reports_path_and_list_and_required_errors(tmp_path):
+    fields = {
+        "missing": FormField(
+            "missing",
+            ParamDef(type=ParamType.FILEPATH, must_exist=True, required=True),
+            type("PathW", (), {"entry": Entry(str(tmp_path / "none.txt"))})(),
+        ),
+        "pairs": FormField("pairs", ParamDef(type=ParamType.KV_LIST), Text("{k: v}")),
+        "items": FormField("items", ParamDef(type=ParamType.STRUCT_LIST), Text("name: x")),
+        "name": FormField("name", ParamDef(type=ParamType.STRING, required=True), Entry("")),
+    }
+
+    _values, errors = collect_v2_form_values(fields)
+
+    assert "missing path does not exist" in errors
+    assert "pairs: must be a list" in errors
+    assert "items: must be a list" in errors
+    assert "name is required" in errors
+
+
+def test_collect_values_reports_numeric_parse_errors():
+    fields = {
+        "i": FormField("i", ParamDef(type=ParamType.INT), Entry("abc")),
+        "f": FormField("f", ParamDef(type=ParamType.FLOAT), Entry("x.y")),
+    }
+
+    _values, errors = collect_v2_form_values(fields)
+
+    assert "i: must be an integer" in errors
+    assert "f: must be a float" in errors
+
+
+def test_masked_fixed_secret_display():
+    assert _display_fixed_value(ParamDef(type=ParamType.SECRET), "plaintext") == "******"
 
 
 def test_apply_values_updates_widgets():

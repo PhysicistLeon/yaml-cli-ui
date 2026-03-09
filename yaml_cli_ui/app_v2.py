@@ -32,7 +32,39 @@ from .ui.status import status_to_color
 from .v2.context import build_runtime_context, context_to_mapping
 from .v2.executor import execute_callable_name
 from .v2.loader import load_v2_document
-from .v2.models import StepResult, V2Document
+from .v2.models import ParamDef, ParamType, SecretSource, StepResult, V2Document
+
+
+def resolve_profile_ui_state(doc: V2Document) -> tuple[bool, str | None, list[str]]:
+    """Return profile selector state: (show_selector, selected_name, all_names)."""
+
+    names = list(doc.profiles.keys())
+    if not names:
+        return False, None, []
+    if len(names) == 1:
+        return False, names[0], names
+    return True, names[0], names
+
+
+def launcher_param_plan(doc: V2Document, launcher_name: str) -> tuple[dict[str, ParamDef], dict[str, Any]]:
+    """Conservative plan: editable root params minus launcher.with; fixed = launcher.with."""
+
+    launcher = doc.launchers[launcher_name]
+    fixed = dict(launcher.with_values)
+    editable = {name: param for name, param in doc.params.items() if name not in fixed}
+    return editable, fixed
+
+
+def _param_has_ready_value(param: ParamDef) -> bool:
+    if param.default is not None:
+        return True
+    if param.type != ParamType.SECRET:
+        return False
+    if param.source == SecretSource.ENV:
+        return bool(param.env)
+    if param.source == SecretSource.VAULT:
+        return True
+    return False
 
 
 def run_launcher(
@@ -42,6 +74,12 @@ def run_launcher(
     *,
     selected_profile_name: str | None = None,
 ) -> StepResult:
+    """Run launcher callable with merged params and short-name bindings from launcher.with.
+
+    `launcher.with_values` is merged into `params` so callables see fixed values in
+    `params` namespace; same map is also passed into `with_values` for bindings.
+    """
+
     launcher = doc.launchers[launcher_name]
     merged_params = dict(params)
     merged_params.update(launcher.with_values)
@@ -64,11 +102,10 @@ class AppV2(tk.Tk):
         super().__init__()
         self.title("YAML CLI UI v2")
         self.geometry("1000x700")
-        self.config_path = config_path
         self.doc: V2Document | None = None
         self.history = RunHistoryStore()
         self.launcher_buttons: dict[str, tk.Button] = {}
-        self.status_labels: dict[str, ttk.Label] = {}
+        self.status_labels: dict[str, tk.Label] = {}
         self.log_widgets: dict[str, tk.Text] = {}
         self.history_vars: dict[str, tk.StringVar] = {}
         self.history_combos: dict[str, ttk.Combobox] = {}
@@ -90,9 +127,9 @@ class AppV2(tk.Tk):
 
         self.output_notebook = ttk.Notebook(self)
         self.output_notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        all_tab = ttk.Frame(self.output_notebook)
-        self.output_notebook.add(all_tab, text="All runs")
-        all_log = tk.Text(all_tab, wrap="word")
+        self.all_tab = ttk.Frame(self.output_notebook)
+        self.output_notebook.add(self.all_tab, text="All runs")
+        all_log = tk.Text(self.all_tab, wrap="word")
         all_log.pack(fill="both", expand=True)
         self.log_widgets["__all__"] = all_log
 
@@ -101,43 +138,58 @@ class AppV2(tk.Tk):
     def reload(self) -> None:
         path = Path(self.path_var.get()).expanduser()
         self.doc = load_v2_document(path)
+        self._clear_launcher_views()
         self._render_profile_selector()
         self._render_launchers()
+
+    def _clear_launcher_views(self) -> None:
+        for tab_id in self.output_notebook.tabs()[1:]:
+            self.output_notebook.forget(tab_id)
+        self.launcher_buttons.clear()
+        self.status_labels.clear()
+        self.history_vars.clear()
+        self.history_combos.clear()
+        for name in list(self.log_widgets.keys()):
+            if name != "__all__":
+                del self.log_widgets[name]
+        for child in self.launchers_frame.winfo_children():
+            child.destroy()
 
     def _render_profile_selector(self) -> None:
         for child in self.profile_frame.winfo_children():
             child.destroy()
         assert self.doc is not None
-        names = list(self.doc.profiles.keys())
+        show_selector, selected, names = resolve_profile_ui_state(self.doc)
         self.profile_combo = None
+        self.profile_var.set(selected or "")
+
         if not names:
-            self.profile_var.set("")
             return
-        if len(names) == 1:
-            self.profile_var.set(names[0])
-            ttk.Label(self.profile_frame, text=f"Profile: {names[0]}").pack(side="left")
+        if not show_selector:
+            ttk.Label(self.profile_frame, text=f"Profile: {selected}").pack(side="left")
             return
+
         ttk.Label(self.profile_frame, text="Profile").pack(side="left")
-        combo = ttk.Combobox(self.profile_frame, values=names, textvariable=self.profile_var, state="readonly")
+        combo = ttk.Combobox(
+            self.profile_frame,
+            values=names,
+            textvariable=self.profile_var,
+            state="readonly",
+        )
         combo.current(0)
         combo.pack(side="left", padx=8)
         self.profile_combo = combo
 
     def _render_launchers(self) -> None:
-        for child in self.launchers_frame.winfo_children():
-            child.destroy()
         assert self.doc is not None
-        self.launcher_buttons.clear()
-        self.status_labels.clear()
 
         for name, launcher in self.doc.launchers.items():
             row = ttk.Frame(self.launchers_frame)
             row.pack(fill="x", pady=3)
             btn = tk.Button(row, text=launcher.title, command=lambda n=name: self.start_launcher(n))
             btn.pack(side="left")
-            info = launcher.info or ""
-            ttk.Label(row, text=info).pack(side="left", padx=8)
-            status = ttk.Label(row, text="idle", background=status_to_color("idle"))
+            ttk.Label(row, text=launcher.info or "").pack(side="left", padx=8)
+            status = tk.Label(row, text=" idle ", bg=status_to_color("idle"))
             status.pack(side="right")
             self.launcher_buttons[name] = btn
             self.status_labels[name] = status
@@ -158,17 +210,14 @@ class AppV2(tk.Tk):
 
     def start_launcher(self, launcher_name: str) -> None:
         assert self.doc is not None
-        launcher = self.doc.launchers[launcher_name]
-        editable = {k: p for k, p in self.doc.params.items() if k not in launcher.with_values}
-        fixed = dict(launcher.with_values)
+        editable, fixed = launcher_param_plan(self.doc, launcher_name)
 
-        requires_input = any(
-            p.required and p.default is None for p in editable.values()
-        ) or bool(editable)
-        if not requires_input:
+        needs_dialog = any(not _param_has_ready_value(param) for param in editable.values())
+        if not needs_dialog:
             self._execute_in_background(launcher_name, {})
             return
 
+        launcher = self.doc.launchers[launcher_name]
         dialog = tk.Toplevel(self)
         dialog.title(launcher.title)
         body = ttk.Frame(dialog)
@@ -202,7 +251,10 @@ class AppV2(tk.Tk):
                     selected_profile_name=(self.profile_var.get() or None),
                 )
                 status = map_step_status(result)
-                text = render_step_result_text(result, secret_values=self._secret_values(values, launcher_name))
+                text = render_step_result_text(
+                    result,
+                    secret_values=self._secret_values(values, launcher_name),
+                )
                 self.after(0, self._complete_run, rec.run_id, launcher_name, status, result, text)
             except Exception as exc:  # noqa: BLE001
                 self.after(0, self._complete_run, rec.run_id, launcher_name, "failed", None, str(exc))
@@ -214,11 +266,11 @@ class AppV2(tk.Tk):
         launcher = self.doc.launchers[launcher_name]
         merged = dict(values)
         merged.update(launcher.with_values)
-        secrets: list[str] = []
-        for name, param in self.doc.params.items():
-            if param.type.value == "secret" and name in merged and merged[name]:
-                secrets.append(str(merged[name]))
-        return secrets
+        return [
+            str(merged[name])
+            for name, param in self.doc.params.items()
+            if param.type == ParamType.SECRET and name in merged and merged[name]
+        ]
 
     def _complete_run(
         self,
@@ -251,7 +303,7 @@ class AppV2(tk.Tk):
 
     def _set_status(self, launcher_name: str, status: str) -> None:
         label = self.status_labels[launcher_name]
-        label.configure(text=status, background=status_to_color(status))
+        label.configure(text=f" {status} ", bg=status_to_color(status))
 
     def _append_log(self, tab: str, text: str) -> None:
         w = self.log_widgets[tab]

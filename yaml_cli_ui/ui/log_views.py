@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from yaml_cli_ui.v2.models import StepResult, StepStatus
 
 
@@ -20,14 +18,19 @@ def map_step_status(result: StepResult) -> str:
     return "idle"
 
 
+def _redact(text: str, secrets: list[str]) -> str:
+    redacted = text
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "******")
+    return redacted
+
+
 def render_step_result_text(result: StepResult, *, secret_values: list[str] | None = None) -> str:
     lines: list[str] = []
     _render(result, lines, 0)
     rendered = "\n".join(lines)
-    for secret in secret_values or []:
-        if secret:
-            rendered = rendered.replace(secret, "***")
-    return rendered
+    return _redact(rendered, secret_values or [])
 
 
 def _render(result: StepResult, lines: list[str], depth: int) -> None:
@@ -45,6 +48,7 @@ def _render(result: StepResult, lines: list[str], depth: int) -> None:
         lines.append(f"{prefix}  stderr: {result.stderr.strip()}")
     if result.error is not None:
         lines.append(f"{prefix}  error: {result.error.type}: {result.error.message}")
+
     foreach_meta = result.meta if isinstance(result.meta, dict) else {}
     if "iteration_count" in foreach_meta:
         lines.append(
@@ -52,5 +56,5 @@ def _render(result: StepResult, lines: list[str], depth: int) -> None:
             f"ok={foreach_meta.get('success_count')} failed={foreach_meta.get('failed_count')}"
         )
 
-    for child in result.children.values():
-        _render(child, lines, depth + 1)
+    for child_name in sorted(result.children):
+        _render(result.children[child_name], lines, depth + 1)

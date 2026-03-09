@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 import yaml
 
-from yaml_cli_ui.v2.models import ParamDef, ParamType
+from yaml_cli_ui.v2.models import ParamDef, ParamType, SecretSource
 
 
 @dataclass
@@ -33,6 +33,20 @@ def _default_value(param: ParamDef) -> Any:
     return ""
 
 
+def _display_fixed_value(param: ParamDef, value: Any) -> str:
+    if param.type == ParamType.SECRET:
+        return "******"
+    return str(value)
+
+
+def _secret_source_display(param: ParamDef) -> str:
+    if param.source == SecretSource.ENV:
+        return f"<env:{param.env or 'MISSING_ENV'}>"
+    if param.source == SecretSource.VAULT:
+        return "<vault>"
+    return ""
+
+
 def create_v2_form_fields(
     parent: tk.Widget,
     params: dict[str, ParamDef],
@@ -49,13 +63,11 @@ def create_v2_form_fields(
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=5, pady=4)
 
         if name in fixed_values:
-            value = fixed_values[name]
-            shown = "***" if param.type == ParamType.SECRET else str(value)
             entry = ttk.Entry(parent)
-            entry.insert(0, shown)
+            entry.insert(0, _display_fixed_value(param, fixed_values[name]))
             entry.configure(state="disabled")
             entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
-            fields[name] = FormField(name, param, entry, fixed=True, fixed_value=value)
+            fields[name] = FormField(name, param, entry, fixed=True, fixed_value=fixed_values[name])
             continue
 
         value = initial_values.get(name, _default_value(param))
@@ -68,6 +80,12 @@ def create_v2_form_fields(
 
 def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
     ptype = param.type
+    if ptype == ParamType.SECRET and param.source in (SecretSource.ENV, SecretSource.VAULT):
+        entry = ttk.Entry(parent)
+        entry.insert(0, _secret_source_display(param))
+        entry.configure(state="disabled")
+        entry.grid(sticky="ew", padx=5, pady=4)
+        return entry
     if ptype in (ParamType.STRING, ParamType.INT, ParamType.FLOAT, ParamType.SECRET):
         entry = ttk.Entry(parent, show="*" if ptype == ParamType.SECRET else "")
         if value not in (None, ""):
@@ -111,10 +129,7 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
         entry.pack(side="left", fill="x", expand=True)
 
         def browse() -> None:
-            if ptype == ParamType.DIRPATH:
-                selected = filedialog.askdirectory()
-            else:
-                selected = filedialog.askopenfilename()
+            selected = filedialog.askdirectory() if ptype == ParamType.DIRPATH else filedialog.askopenfilename()
             if selected:
                 entry.delete(0, "end")
                 entry.insert(0, selected)
@@ -137,31 +152,41 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
     return entry
 
 
+def _resolve_secret_value(param: ParamDef, raw_value: Any) -> Any:
+    if param.source == SecretSource.ENV:
+        if not param.env:
+            return ""
+        return os.environ.get(param.env, "")
+    if param.source == SecretSource.VAULT:
+        # Vault resolution is intentionally deferred in this step.
+        return "<vault>"
+    return raw_value
+
+
 def collect_v2_form_values(fields: dict[str, FormField]) -> tuple[dict[str, Any], list[str]]:
     data: dict[str, Any] = {}
     errors: list[str] = []
     for name, field in fields.items():
-        if field.fixed:
-            value = field.fixed_value
-        else:
-            value = _read_widget_value(field.widget, field.param)
+        try:
+            raw_value = field.fixed_value if field.fixed else _read_widget_value(field.widget, field.param)
+        except ValueError as exc:
+            errors.append(f"{name}: {exc}")
+            continue
+
+        value = _resolve_secret_value(field.param, raw_value) if field.param.type == ParamType.SECRET else raw_value
 
         if field.param.required and (value in (None, "", [])):
             errors.append(f"{name} is required")
 
         if field.param.type in (ParamType.FILEPATH, ParamType.DIRPATH) and value:
             path = Path(str(value))
-            if field.param.must_exist and not path.exists():
-                errors.append(f"{name} path does not exist")
-            if field.param.type == ParamType.FILEPATH and path.exists() and not path.is_file():
-                errors.append(f"{name} must be a file")
-            if field.param.type == ParamType.DIRPATH and path.exists() and not path.is_dir():
-                errors.append(f"{name} must be a directory")
-
-        if field.param.type == ParamType.SECRET and field.param.source is not None:
-            env_name = field.param.env
-            if env_name:
-                value = os.environ.get(env_name, "")
+            if field.param.must_exist:
+                if not path.exists():
+                    errors.append(f"{name} path does not exist")
+                elif field.param.type == ParamType.FILEPATH and not path.is_file():
+                    errors.append(f"{name} must be a file")
+                elif field.param.type == ParamType.DIRPATH and not path.is_dir():
+                    errors.append(f"{name} must be a directory")
 
         data[name] = value
 
@@ -180,13 +205,22 @@ def _read_widget_value(widget: Any, param: ParamDef) -> Any:
         return widget.entry.get().strip()
     if ptype in (ParamType.KV_LIST, ParamType.STRUCT_LIST):
         raw = widget.get("1.0", "end").strip()
-        return [] if not raw else yaml.safe_load(raw)
+        parsed = [] if not raw else yaml.safe_load(raw)
+        if not isinstance(parsed, list):
+            raise ValueError("must be a list")
+        return parsed
 
     raw = widget.get().strip() if hasattr(widget, "get") else ""
     if ptype == ParamType.INT and raw != "":
-        return int(raw)
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError("must be an integer") from exc
     if ptype == ParamType.FLOAT and raw != "":
-        return float(raw)
+        try:
+            return float(raw)
+        except ValueError as exc:
+            raise ValueError("must be a float") from exc
     return raw
 
 
