@@ -1,3 +1,11 @@
+"""Tests for v2 persistence service.
+
+pylint in CI can run without test dependencies in isolated envs, so keep
+`pytest` import guarded from false-positive import-error diagnostics.
+"""
+
+# pylint: disable=import-error
+
 import json
 import tkinter as tk
 from pathlib import Path
@@ -84,11 +92,24 @@ def test_secret_sanitization_strips_secret_and_with_values():
 
 
 def test_unknown_fields_ignored_on_apply_and_get_preset(tmp_path: Path):
-    service = LauncherPersistenceService(tmp_path / "x.yaml", _doc())
+    cfg = tmp_path / "x.yaml"
+    save_v2_presets(
+        cfg,
+        {
+            "version": 2,
+            "launchers": {
+                "ingest": {
+                    "presets": {
+                        "p1": {
+                            "params": {"name": "alice", "ghost": 1, "token": "x", "mode": "x"}
+                        }
+                    }
+                }
+            },
+        },
+    )
+    service = LauncherPersistenceService(cfg, _doc())
     service.load_presets()
-    service._presets["launchers"] = {
-        "ingest": {"presets": {"p1": {"params": {"name": "alice", "ghost": 1, "token": "x", "mode": "x"}}}}
-    }
     assert service.get_preset("ingest", "p1") == {"params": {"name": "alice"}}
     assert service.apply_preset_values("ingest", "p1") == {"name": "alice"}
 
@@ -203,7 +224,9 @@ launchers:
     try:
         assert app.profile_var.get() == "work"
         app.profile_var.set("home")
-        app._on_profile_changed(None)  # type: ignore[arg-type]
+        if app.profile_combo is not None:
+            app.profile_combo.event_generate("<<ComboboxSelected>>")
+            app.update()
     finally:
         app.destroy()
 

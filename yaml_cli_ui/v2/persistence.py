@@ -31,6 +31,8 @@ V2StateFile :=
 ParamValueMap := map of param_id -> stored_value, excluding secret params.
 """
 
+# pylint: disable=duplicate-code
+
 from __future__ import annotations
 
 import json

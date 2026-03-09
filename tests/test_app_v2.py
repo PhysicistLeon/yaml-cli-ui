@@ -278,7 +278,7 @@ launchers:
 
     captured = {}
 
-    def fake_create(parent, params, *, initial_values=None, fixed_values=None):
+    def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
         captured["initial_values"] = dict(initial_values or {})
         captured["fixed_values"] = dict(fixed_values or {})
         return {}
@@ -323,7 +323,7 @@ launchers:
 
     calls = []
 
-    def fake_showwarning(title, message, parent=None):
+    def fake_showwarning(title, message, _parent=None):
         calls.append((title, message))
 
     monkeypatch.setattr("yaml_cli_ui.app_v2.messagebox.showwarning", fake_showwarning)
