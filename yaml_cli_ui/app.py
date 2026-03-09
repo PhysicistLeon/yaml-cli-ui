@@ -554,6 +554,17 @@ class App(tk.Tk):
     def load_config(self) -> None:
         try:
             self.config_path = Path(self.path_entry.get())
+            from .bootstrap import detect_yaml_version, open_app_for_config
+
+            if detect_yaml_version(self.config_path) != 1:
+                replacement = open_app_for_config(
+                    self.config_path,
+                    browse_dir=self.browse_dir,
+                )
+                self.destroy()
+                replacement.mainloop()
+                return
+
             self.preset_service = PresetService(self.config_path)
             self.app_config = yaml.safe_load(
                 self.config_path.read_text(encoding="utf-8")

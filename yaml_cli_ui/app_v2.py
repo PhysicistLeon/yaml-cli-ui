@@ -144,6 +144,14 @@ class AppV2(tk.Tk):
 
     def reload(self) -> None:
         path = Path(self.path_var.get()).expanduser()
+        from .bootstrap import detect_yaml_version, open_app_for_config
+
+        if detect_yaml_version(path) != 2:
+            replacement = open_app_for_config(path)
+            self.destroy()
+            replacement.mainloop()
+            return
+
         self.doc = load_v2_document(path)
         self.persistence = LauncherPersistenceService(path, self.doc)
         self.persistence.load_presets()
