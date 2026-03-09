@@ -3,11 +3,13 @@
 import sys
 import time
 import tkinter as tk
+from tkinter import ttk
 
 import pytest
 
 from yaml_cli_ui.app_v2 import (
     AppV2,
+    collect_used_params_for_launcher,
     launcher_param_plan,
     resolve_profile_ui_state,
     run_launcher,
@@ -15,10 +17,15 @@ from yaml_cli_ui.app_v2 import (
 from yaml_cli_ui.v2.loader import load_v2_document
 from yaml_cli_ui.v2.persistence import save_v2_presets, save_v2_state
 from yaml_cli_ui.v2.models import (
+    CommandDef,
+    ForeachSpec,
     LauncherDef,
+    PipelineDef,
     ParamDef,
     ParamType,
     ProfileDef,
+    RunSpec,
+    StepSpec,
     V2Document,
 )
 
@@ -89,6 +96,10 @@ def test_launcher_param_plan_with_fixed_bindings():
         params={
             "x": ParamDef(type=ParamType.STRING),
             "y": ParamDef(type=ParamType.STRING),
+            "unused": ParamDef(type=ParamType.STRING),
+        },
+        commands={
+            "c": CommandDef(run=RunSpec(program="echo", argv=["$params.x", "$params.y"]))
         },
         launchers={
             "l": LauncherDef(title="L", use="c", with_values={"y": "fixed"}),
@@ -99,6 +110,55 @@ def test_launcher_param_plan_with_fixed_bindings():
 
     assert set(editable.keys()) == {"x"}
     assert fixed == {"y": "fixed"}
+
+
+def test_collect_used_params_for_command_filters_unused():
+    doc = V2Document(
+        params={
+            "source_url": ParamDef(type=ParamType.STRING),
+            "bitrate": ParamDef(type=ParamType.STRING),
+            "unused_param": ParamDef(type=ParamType.STRING),
+        },
+        commands={
+            "download": CommandDef(run=RunSpec(program="yt", argv=["$params.source_url"]))
+        },
+        launchers={"run": LauncherDef(title="Run", use="download")},
+    )
+
+    used = collect_used_params_for_launcher(doc, "run")
+    assert used == {"source_url"}
+
+
+def test_collect_used_params_for_pipeline_nested_graph():
+    doc = V2Document(
+        params={
+            "source_url": ParamDef(type=ParamType.STRING),
+            "collection": ParamDef(type=ParamType.STRING),
+            "unused_param": ParamDef(type=ParamType.STRING),
+        },
+        commands={
+            "fetch": CommandDef(run=RunSpec(program="fetch", argv=["$params.source_url"])),
+            "save": CommandDef(run=RunSpec(program="save", argv=["$params.collection"])),
+        },
+        pipelines={
+            "main": PipelineDef(
+                steps=[
+                    "fetch",
+                    StepSpec(
+                        foreach=ForeachSpec(
+                            in_expr="$params.collection",
+                            as_name="item",
+                            steps=["save"],
+                        )
+                    ),
+                ]
+            )
+        },
+        launchers={"run": LauncherDef(title="Run", use="main")},
+    )
+
+    used = collect_used_params_for_launcher(doc, "run")
+    assert used == {"source_url", "collection"}
 
 
 def test_run_launcher_executes(v2_yaml):
@@ -178,6 +238,91 @@ launchers:
         app._execute_in_background = fake_exec  # type: ignore[method-assign]
         app.start_launcher("l")
         assert calls == [{"name": "l", "values": {}}]
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_skips_dialog_when_only_fixed_params(tmp_path):
+    path = tmp_path / "fixed_only.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  collection:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.collection"]
+launchers:
+  l:
+    title: L
+    use: hello
+    with:
+      collection: fixed
+""",
+        encoding="utf-8",
+    )
+    app = _maybe_app(path)
+    try:
+        calls: list[dict[str, str]] = []
+
+        def fake_exec(name, values):
+            calls.append({"name": name, "values": values})
+
+        app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        app.start_launcher("l")
+        assert calls == [{"name": "l", "values": {}}]
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_opens_dialog_when_editable_exists(tmp_path, monkeypatch):
+    path = tmp_path / "needs_input.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  source_url:
+    type: string
+    required: true
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.source_url"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    app = _maybe_app(path)
+    try:
+        created = {"count": 0}
+
+        real_toplevel = tk.Toplevel
+
+        def capture_toplevel(*args, **kwargs):
+            created["count"] += 1
+            return real_toplevel(*args, **kwargs)
+
+        monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
+        app.start_launcher("l")
+        assert created["count"] == 1
+    finally:
+        app.destroy()
+
+
+def test_launcher_info_attaches_tooltip_not_inline_label(v2_yaml):
+    app = _maybe_app(v2_yaml)
+    try:
+        btn = app.launcher_buttons["run_hello"]
+        assert btn.bind("<Enter>")
+        labels = [child for child in btn.master.winfo_children() if isinstance(child, ttk.Label)]
+        assert labels == []
     finally:
         app.destroy()
 
