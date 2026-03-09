@@ -293,6 +293,18 @@ class LauncherPersistenceService:
             return None
         return {"params": self._filter_editable_values(launcher_name, params)}
 
+    def get_preset_raw_params(self, launcher_name: str, preset_name: str) -> dict[str, Any]:
+        """Return stored preset params without filtering for compatibility checks."""
+
+        presets = self._ensure_launcher_presets(launcher_name)
+        preset = presets.get(preset_name)
+        if not isinstance(preset, dict):
+            return {}
+        params = preset.get("params")
+        if not isinstance(params, dict):
+            return {}
+        return dict(params)
+
     def upsert_preset(
         self,
         launcher_name: str,

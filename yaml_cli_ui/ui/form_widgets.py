@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,111 @@ def _secret_source_display(param: ParamDef) -> str:
 
 
 LONG_ENTRY_WIDTH = 60
+
+
+def _should_use_slider(param: ParamDef) -> bool:
+    if param.type not in (ParamType.INT, ParamType.FLOAT):
+        return False
+    if param.widget == "slider":
+        return True
+    if param.widget is not None:
+        return False
+    return param.min is not None and param.max is not None
+
+
+def _safe_float(value: Any, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _slider_decimals(param: ParamDef) -> int:
+    if param.type == ParamType.INT:
+        return 0
+    if param.step in (None, ""):
+        return 3
+    try:
+        decimal = Decimal(str(param.step)).normalize()
+    except (InvalidOperation, ValueError):
+        return 3
+    exponent = decimal.as_tuple().exponent
+    return min(6, max(0, -exponent))
+
+
+def _normalize_slider_value(
+    raw_value: Any,
+    *,
+    minimum: float,
+    maximum: float,
+    step: float,
+    decimals: int,
+    ptype: ParamType,
+) -> int | float:
+    current = _safe_float(raw_value, minimum)
+    clamped = min(maximum, max(minimum, current))
+    snapped = round((clamped - minimum) / step) * step + minimum
+    bounded = min(maximum, max(minimum, snapped))
+    if ptype == ParamType.INT:
+        return int(round(bounded))
+    return round(float(bounded), decimals)
+
+
+def _create_numeric_slider(parent: tk.Widget, param: ParamDef, value: Any) -> ttk.Frame:
+    frame = ttk.Frame(parent)
+    minimum = _safe_float(param.min, 0.0)
+    maximum = _safe_float(param.max, 100.0)
+    step = _safe_float(param.step, 1.0)
+    if step <= 0:
+        step = 1.0
+
+    decimals = _slider_decimals(param)
+    if param.type == ParamType.INT:
+        var: tk.Variable = tk.IntVar(value=int(minimum))
+    else:
+        var = tk.DoubleVar(value=minimum)
+
+    value_label = ttk.Label(frame, width=10, text="")
+
+    def _format_number(v: float) -> str:
+        return str(int(round(v))) if param.type == ParamType.INT else f"{v:.{decimals}f}".rstrip("0").rstrip(".")
+
+    def _set_normalized(raw: Any) -> None:
+        normalized = _normalize_slider_value(
+            raw,
+            minimum=minimum,
+            maximum=maximum,
+            step=step,
+            decimals=decimals,
+            ptype=param.type,
+        )
+        if param.type == ParamType.INT:
+            if int(var.get()) != int(normalized):
+                var.set(int(normalized))
+            value_label.configure(text=str(int(normalized)))
+            return
+        if abs(float(var.get()) - float(normalized)) > 1e-9:
+            var.set(float(normalized))
+        value_label.configure(text=_format_number(float(normalized)))
+
+    def _on_scale(raw: str) -> None:
+        _set_normalized(raw)
+
+    scale = ttk.Scale(frame, from_=minimum, to=maximum, variable=var, command=_on_scale)
+    scale.pack(side="left", fill="x", expand=True)
+    value_label.pack(side="left", padx=(8, 0))
+    _set_normalized(value)
+
+    frame.slider_var = var
+    frame.slider_min = minimum
+    frame.slider_max = maximum
+    frame.slider_step = step
+    frame.slider_type = param.type
+    frame.slider_decimals = decimals
+    frame.value_label = value_label
+    frame.scale = scale
+    frame.set_slider_value = _set_normalized
+    return frame
 
 
 def create_v2_form_fields(
@@ -98,6 +204,8 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any, *, row: int) 
         widget = ttk.Entry(parent, width=LONG_ENTRY_WIDTH)
         widget.insert(0, _secret_source_display(param))
         widget.configure(state="disabled")
+    elif ptype in (ParamType.INT, ParamType.FLOAT) and _should_use_slider(param):
+        widget = _create_numeric_slider(parent, param, value)
     elif ptype in (ParamType.STRING, ParamType.INT, ParamType.FLOAT, ParamType.SECRET):
         widget = ttk.Entry(parent, width=LONG_ENTRY_WIDTH, show="*" if ptype == ParamType.SECRET else "")
         if value not in (None, ""):
@@ -212,6 +320,12 @@ def _read_widget_value(widget: Any, param: ParamDef) -> Any:
         if not isinstance(parsed, list):
             raise ValueError("must be a list")
         value = parsed
+    elif ptype in (ParamType.INT, ParamType.FLOAT) and hasattr(widget, "slider_var"):
+        value = widget.slider_var.get()
+        if ptype == ParamType.INT:
+            value = int(value)
+        else:
+            value = float(value)
     else:
         raw = widget.get().strip() if hasattr(widget, "get") else ""
         if ptype == ParamType.INT and raw != "":
@@ -260,6 +374,9 @@ def _set_widget_value(widget: Any, param: ParamDef, value: Any) -> None:
         widget.entry.delete(0, "end")
         if value != "":
             widget.entry.insert(0, str(value))
+        return
+    if param.type in (ParamType.INT, ParamType.FLOAT) and hasattr(widget, "set_slider_value"):
+        widget.set_slider_value(value if value != "" else widget.slider_min)
         return
     if hasattr(widget, "delete"):
         widget.delete(0, "end")

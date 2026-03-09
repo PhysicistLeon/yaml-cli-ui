@@ -31,6 +31,29 @@ When opening launcher form, values are applied in this order:
 
 Unknown/removed fields in presets/state are ignored.
 
+Launcher dialog structure (EBNF-like):
+
+- `LauncherDialog := PresetBar ParamFields UnusedPresetFieldsWarning Actions`
+- `PresetBar := preset_selector apply save/create overwrite rename delete`
+- `NumericSliderField := slider current_value_display bound_numeric_variable`
+- `PresetApply := preset values -> editable fields; ignore unknown; never override launcher.with`
+
+When a preset contains fields that are no longer editable for the launcher,
+they are ignored during apply and shown in the dialog compatibility block
+(`Unused preset fields`).
+
+Numeric params support slider widgets in v2 launcher forms:
+
+- explicit: `widget: "slider"` for `int`/`float`
+- implicit fallback: `min` + `max` can render a slider when `widget` is omitted
+- explicit non-slider widget keeps non-slider rendering (explicit `widget` has priority)
+
+Slider normalization is deterministic for init/apply/collect paths:
+
+- values are clamped to `[min, max]`
+- values are snapped to `step` (with safe fallback when `step <= 0`)
+- `int` sliders return `int`, `float` sliders return `float`
+
 ## Not implemented by design in this step
 
 - automatic v1 -> v2 storage migration

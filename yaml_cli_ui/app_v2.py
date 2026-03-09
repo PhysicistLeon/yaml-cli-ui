@@ -11,10 +11,12 @@ AppV2Flow :=
   render StepResult into logs/history/status
 
 LauncherDialog :=
+  preset bar (selector/apply/save-create/overwrite/rename/delete)
   editable params
   fixed/read-only with-bound params
+  unused preset fields warning block
   validation
-  submit -> background execution
+  submit/cancel -> background execution
 
 Launcher UX :=
   launcher.info is displayed via hover tooltip (no inline label)
@@ -208,6 +210,17 @@ def should_open_launcher_dialog(editable: dict[str, ParamDef], fixed: dict[str, 
     """
 
     return bool(editable or fixed)
+
+
+def split_preset_values_for_launcher(
+    preset_values: dict[str, Any],
+    editable_param_names: set[str],
+) -> tuple[dict[str, Any], list[str]]:
+    """Split preset values into applicable/editable values and unused field names."""
+
+    used = {name: value for name, value in preset_values.items() if name in editable_param_names}
+    unused = sorted(name for name in preset_values if name not in editable_param_names)
+    return used, unused
 
 
 def run_launcher(
@@ -438,6 +451,7 @@ class AppV2(tk.Tk):
         dialog.title(launcher.title)
         body = ttk.Frame(dialog)
         body.pack(fill="both", expand=True, padx=10, pady=10)
+        body.columnconfigure(0, weight=1)
         initial_values: dict[str, Any] = {}
         selected_preset_var = tk.StringVar(value="")
         preset_values: dict[str, Any] = {}
@@ -449,13 +463,50 @@ class AppV2(tk.Tk):
                 preset_values = self.persistence.apply_preset_values(launcher_name, last_preset)
                 initial_values.update(preset_values)
         ordered_editable = order_editable_params_for_dialog(editable, initial_values)
-        fields = create_v2_form_fields(body, ordered_editable, initial_values=initial_values, fixed_values=fixed)
+        form_frame = ttk.Frame(body)
+        form_frame.grid(row=1, column=0, sticky="nsew")
+        fields = create_v2_form_fields(
+            form_frame,
+            ordered_editable,
+            initial_values=initial_values,
+            fixed_values=fixed,
+        )
 
+        editable_param_names = set(ordered_editable.keys())
         presets_row = ttk.Frame(body)
-        presets_row.grid(row=len(ordered_editable), column=0, columnspan=2, sticky="ew", padx=5, pady=(8, 2))
+        presets_row.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=(2, 8))
         ttk.Label(presets_row, text="Preset").pack(side="left")
         preset_combo = ttk.Combobox(presets_row, textvariable=selected_preset_var, state="readonly")
         preset_combo.pack(side="left", fill="x", expand=True, padx=6)
+
+        warning_frame = ttk.LabelFrame(body, text="Unused preset fields")
+        warning_text = tk.Text(warning_frame, height=3, wrap="word")
+        warning_text.pack(fill="both", expand=True, padx=4, pady=4)
+        warning_text.configure(state="disabled")
+        current_unused_fields: list[str] = []
+
+        def set_unused_fields(unused: list[str]) -> None:
+            nonlocal current_unused_fields
+            current_unused_fields = list(unused)
+            warning_text.configure(state="normal")
+            warning_text.delete("1.0", "end")
+            if unused:
+                warning_text.insert("end", "\n".join(unused))
+            warning_text.configure(state="disabled")
+
+        def refresh_preset_ui(*, apply: bool) -> None:
+            if not self.persistence:
+                set_unused_fields([])
+                return
+            name = selected_preset_var.get().strip()
+            if not name:
+                set_unused_fields([])
+                return
+            raw = self.persistence.get_preset_raw_params(launcher_name, name)
+            values, unused = split_preset_values_for_launcher(raw, editable_param_names)
+            set_unused_fields(unused)
+            if apply and values:
+                apply_values_to_v2_form(fields, values)
 
         def refresh_presets() -> None:
             if not self.persistence:
@@ -465,26 +516,27 @@ class AppV2(tk.Tk):
             preset_combo["values"] = values
             if selected_preset_var.get() and selected_preset_var.get() not in values:
                 selected_preset_var.set("")
+                set_unused_fields([])
 
         def on_select_preset(_event: tk.Event[Any] | None = None) -> None:
-            if not self.persistence:
-                return
-            name = selected_preset_var.get()
-            values = self.persistence.apply_preset_values(launcher_name, name)
-            if not values:
-                return
-            apply_values_to_v2_form(fields, values)
+            refresh_preset_ui(apply=True)
 
         def save_preset(overwrite: bool) -> None:
             if not self.persistence:
                 return
             current = selected_preset_var.get().strip()
-            if not current or not overwrite:
+            if overwrite and not current:
+                messagebox.showerror("Preset", "Select a preset to overwrite.", parent=dialog)
+                return
+            if not overwrite:
                 asked = simpledialog.askstring("Save preset", "Preset name:", parent=dialog)
                 if not asked:
                     return
                 current = asked.strip()
                 if not current:
+                    return
+                if current in self.persistence.list_presets(launcher_name):
+                    messagebox.showerror("Preset", f"Preset '{current}' already exists.", parent=dialog)
                     return
             values, errors = collect_v2_form_values(fields)
             if errors:
@@ -493,6 +545,7 @@ class AppV2(tk.Tk):
             self.persistence.upsert_preset(launcher_name, current, values)
             selected_preset_var.set(current)
             refresh_presets()
+            refresh_preset_ui(apply=False)
 
         def rename_preset() -> None:
             if not self.persistence:
@@ -503,9 +556,16 @@ class AppV2(tk.Tk):
             new_name = simpledialog.askstring("Rename preset", "New preset name:", parent=dialog)
             if not new_name:
                 return
-            self.persistence.rename_preset(launcher_name, old, new_name.strip())
-            selected_preset_var.set(new_name.strip())
+            target = new_name.strip()
+            if not target:
+                return
+            if target != old and target in self.persistence.list_presets(launcher_name):
+                messagebox.showerror("Preset", f"Preset '{target}' already exists.", parent=dialog)
+                return
+            self.persistence.rename_preset(launcher_name, old, target)
+            selected_preset_var.set(target)
             refresh_presets()
+            refresh_preset_ui(apply=False)
 
         def delete_preset() -> None:
             if not self.persistence:
@@ -513,17 +573,26 @@ class AppV2(tk.Tk):
             name = selected_preset_var.get().strip()
             if not name:
                 return
+            if not messagebox.askyesno("Delete preset", f"Delete preset '{name}'?", parent=dialog):
+                return
             self.persistence.delete_preset(launcher_name, name)
             selected_preset_var.set("")
             refresh_presets()
+            refresh_preset_ui(apply=False)
 
         ttk.Button(presets_row, text="Apply", command=on_select_preset).pack(side="left", padx=2)
-        ttk.Button(presets_row, text="Save", command=lambda: save_preset(overwrite=False)).pack(side="left", padx=2)
+        ttk.Button(presets_row, text="Save/Create", command=lambda: save_preset(overwrite=False)).pack(side="left", padx=2)
         ttk.Button(presets_row, text="Overwrite", command=lambda: save_preset(overwrite=True)).pack(side="left", padx=2)
         ttk.Button(presets_row, text="Rename", command=rename_preset).pack(side="left", padx=2)
         ttk.Button(presets_row, text="Delete", command=delete_preset).pack(side="left", padx=2)
         preset_combo.bind("<<ComboboxSelected>>", on_select_preset)
         refresh_presets()
+        if selected_preset_var.get():
+            refresh_preset_ui(apply=True)
+        elif current_unused_fields:
+            set_unused_fields([])
+
+        warning_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(8, 4))
 
         def on_run() -> None:
             values, errors = collect_v2_form_values(fields)
@@ -539,6 +608,7 @@ class AppV2(tk.Tk):
 
         footer = ttk.Frame(dialog)
         footer.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Button(footer, text="Cancel", command=dialog.destroy).pack(side="right", padx=(0, 6))
         ttk.Button(footer, text="Run", command=on_run).pack(side="right")
 
     def _execute_in_background(self, launcher_name: str, values: dict[str, Any]) -> None:
