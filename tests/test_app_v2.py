@@ -14,6 +14,7 @@ from yaml_cli_ui.app_v2 import (
     resolve_profile_ui_state,
     materialize_launcher_params,
     run_launcher,
+    should_open_launcher_dialog,
 )
 from yaml_cli_ui.v2.errors import V2ExpressionError
 from yaml_cli_ui.v2.loader import load_v2_document
@@ -113,6 +114,37 @@ def test_launcher_param_plan_with_fixed_bindings():
 
     assert set(editable.keys()) == {"x"}
     assert fixed == {"y": "fixed"}
+
+
+def test_launcher_param_plan_with_no_used_params():
+    doc = V2Document(
+        params={
+            "x": ParamDef(type=ParamType.STRING),
+        },
+        commands={
+            "c": CommandDef(run=RunSpec(program="echo", argv=["ok"]))
+        },
+        launchers={
+            "l": LauncherDef(title="L", use="c", with_values={"x": "fixed"}),
+        },
+    )
+
+    editable, fixed = launcher_param_plan(doc, "l")
+
+    assert editable == {}
+    assert fixed == {}
+
+
+def test_should_open_launcher_dialog_no_params_is_false():
+    assert should_open_launcher_dialog({}, {}) is False
+
+
+def test_should_open_launcher_dialog_with_defaulted_editable_is_true():
+    assert should_open_launcher_dialog({"username": ParamDef(type=ParamType.STRING, default="Leon")}, {}) is True
+
+
+def test_should_open_launcher_dialog_with_only_fixed_with_values_is_true():
+    assert should_open_launcher_dialog({}, {"username": "fixed"}) is True
 
 
 def test_collect_used_params_for_command_filters_unused():
@@ -296,7 +328,7 @@ def test_background_completion_updates_history_and_logs(v2_yaml):
         app.destroy()
 
 
-def test_start_launcher_autorun_when_all_editable_ready(tmp_path, monkeypatch):
+def test_start_launcher_opens_dialog_when_params_are_defaulted(tmp_path, monkeypatch):
     path = tmp_path / "auto.yaml"
     path.write_text(
         f"""
@@ -331,13 +363,80 @@ launchers:
             calls.append({"name": name, "values": values})
 
         app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        created = {"count": 0}
+
+        real_toplevel = tk.Toplevel
+
+        def capture_toplevel(*args, **kwargs):
+            created["count"] += 1
+            return real_toplevel(*args, **kwargs)
+
+        monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
         app.start_launcher("l")
-        assert calls == [{"name": "l", "values": {}}]
+        assert calls == []
+        assert created["count"] == 1
     finally:
         app.destroy()
 
 
-def test_start_launcher_skips_dialog_when_only_fixed_params(tmp_path):
+def test_start_launcher_opens_dialog_when_param_prefilled_from_state_or_preset(tmp_path, monkeypatch):
+    path = tmp_path / "prefilled.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.username"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    save_v2_state(
+        path,
+        {
+            "version": 2,
+            "selected_profile": None,
+            "launchers": {"l": {"last_values": {"username": "state_user"}, "last_selected_preset": "p"}},
+        },
+    )
+    save_v2_presets(
+        path,
+        {"version": 2, "launchers": {"l": {"presets": {"p": {"params": {"username": "preset_user"}}}}}},
+    )
+
+    app = _maybe_app(path)
+    try:
+        calls: list[dict[str, str]] = []
+
+        def fake_exec(name, values):
+            calls.append({"name": name, "values": values})
+
+        app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        created = {"count": 0}
+
+        real_toplevel = tk.Toplevel
+
+        def capture_toplevel(*args, **kwargs):
+            created["count"] += 1
+            return real_toplevel(*args, **kwargs)
+
+        monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
+        app.start_launcher("l")
+        assert calls == []
+        assert created["count"] == 1
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_opens_dialog_when_only_fixed_used_params(tmp_path, monkeypatch):
     path = tmp_path / "fixed_only.yaml"
     path.write_text(
         f"""
@@ -356,6 +455,60 @@ launchers:
     use: hello
     with:
       collection: fixed
+""",
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        captured["initial_values"] = dict(initial_values or {})
+        captured["fixed_values"] = dict(fixed_values or {})
+        return {}
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.create_v2_form_fields", fake_create)
+
+    app = _maybe_app(path)
+    try:
+        calls: list[dict[str, str]] = []
+
+        def fake_exec(name, values):
+            calls.append({"name": name, "values": values})
+
+        app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        created = {"count": 0}
+
+        real_toplevel = tk.Toplevel
+
+        def capture_toplevel(*args, **kwargs):
+            created["count"] += 1
+            return real_toplevel(*args, **kwargs)
+
+        monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
+        app.start_launcher("l")
+
+        assert calls == []
+        assert created["count"] == 1
+        assert captured["fixed_values"] == {"collection": "fixed"}
+        assert captured["initial_values"] == {}
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_skips_dialog_when_launcher_has_no_params(tmp_path):
+    path = tmp_path / "no_params.yaml"
+    path.write_text(
+        f"""
+version: 2
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')"]
+launchers:
+  l:
+    title: L
+    use: hello
 """,
         encoding="utf-8",
     )
@@ -459,6 +612,79 @@ launchers:
     try:
         assert app.profile_var.get() == "fast"
         assert app.profile_combo is not None
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_form_receives_prefilled_and_fixed_values(tmp_path, monkeypatch):
+    path = tmp_path / "prefilled_and_fixed.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+  collection:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.username", "$params.collection"]
+launchers:
+  l:
+    title: L
+    use: hello
+    with:
+      collection: fixed_collection
+""",
+        encoding="utf-8",
+    )
+    save_v2_state(
+        path,
+        {
+            "version": 2,
+            "selected_profile": None,
+            "launchers": {"l": {"last_values": {"username": "state_user"}, "last_selected_preset": "p"}},
+        },
+    )
+    save_v2_presets(
+        path,
+        {"version": 2, "launchers": {"l": {"presets": {"p": {"params": {"username": "preset_user"}}}}}},
+    )
+
+    captured = {}
+
+    def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        captured["initial_values"] = dict(initial_values or {})
+        captured["fixed_values"] = dict(fixed_values or {})
+        return {}
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.create_v2_form_fields", fake_create)
+
+    app = _maybe_app(path)
+    try:
+        calls: list[dict[str, str]] = []
+
+        def fake_exec(name, values):
+            calls.append({"name": name, "values": values})
+
+        app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        created = {"count": 0}
+
+        real_toplevel = tk.Toplevel
+
+        def capture_toplevel(*args, **kwargs):
+            created["count"] += 1
+            return real_toplevel(*args, **kwargs)
+
+        monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
+        app.start_launcher("l")
+
+        assert calls == []
+        assert created["count"] == 1
+        assert captured["initial_values"]["username"] == "preset_user"
+        assert captured["fixed_values"] == {"collection": "fixed_collection"}
     finally:
         app.destroy()
 

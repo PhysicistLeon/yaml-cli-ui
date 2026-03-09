@@ -19,7 +19,7 @@ LauncherDialog :=
 Launcher UX :=
   launcher.info is displayed via hover tooltip (no inline label)
   launcher dialog includes only params used by selected launcher graph
-  launcher starts immediately when no editable input is needed
+  launcher starts immediately only when selected launcher uses no root params
 
 Param materialization precedence for launcher execution:
   root defaults -> persisted last_values -> selected preset -> user-entered -> launcher.with
@@ -47,7 +47,7 @@ from .v2.context import build_runtime_context, context_to_mapping
 from .v2.executor import execute_callable_name
 from .v2.errors import V2Error
 from .v2.loader import load_v2_document
-from .v2.models import ParamDef, ParamType, SecretSource, StepResult, V2Document
+from .v2.models import ParamDef, ParamType, StepResult, V2Document
 from .v2.persistence import LauncherPersistenceService
 
 
@@ -172,16 +172,16 @@ def launcher_param_plan(doc: V2Document, launcher_name: str) -> tuple[dict[str, 
     return editable, fixed
 
 
-def _param_has_ready_value(param: ParamDef) -> bool:
-    if param.default is not None:
-        return True
-    if param.type != ParamType.SECRET:
-        return False
-    if param.source == SecretSource.ENV:
-        return bool(param.env)
-    if param.source == SecretSource.VAULT:
-        return True
-    return False
+def should_open_launcher_dialog(editable: dict[str, ParamDef], fixed: dict[str, Any]) -> bool:
+    """Return True when launcher dialog should be shown before execution.
+
+    Defaults, persisted state, and presets only prefill form values and never suppress
+    the dialog. `launcher.with` values remain fixed/read-only but still count as used
+    params for dialog gating. The dialog is skipped only when launcher execution graph
+    uses no root params at all.
+    """
+
+    return bool(editable or fixed)
 
 
 def run_launcher(
@@ -403,8 +403,7 @@ class AppV2(tk.Tk):
         assert self.doc is not None
         editable, fixed = launcher_param_plan(self.doc, launcher_name)
 
-        needs_dialog = any(not _param_has_ready_value(param) for param in editable.values())
-        if not needs_dialog:
+        if not should_open_launcher_dialog(editable, fixed):
             self._execute_in_background(launcher_name, {})
             return
 
