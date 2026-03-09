@@ -1,0 +1,12 @@
+version: 2
+imports:
+  cycle: ./packs/cycle_a.yaml
+commands:
+  root_cmd:
+    run:
+      program: python
+      argv: [-V]
+launchers:
+  root:
+    title: Root
+    use: root_cmd

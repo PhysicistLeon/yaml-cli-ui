@@ -1,0 +1,13 @@
+version: 2
+commands:
+  dup:
+    run:
+      program: python
+      argv: [-V]
+pipelines:
+  dup:
+    steps: [dup]
+launchers:
+  run_dup:
+    title: Dup
+    use: dup

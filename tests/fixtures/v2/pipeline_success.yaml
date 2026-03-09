@@ -1,0 +1,14 @@
+version: 2
+commands:
+  emit_ok:
+    run:
+      program: python
+      argv: [-c, "print('ok')"]
+pipelines:
+  simple:
+    steps:
+      - emit_ok
+launchers:
+  run_simple:
+    title: Run simple
+    use: simple

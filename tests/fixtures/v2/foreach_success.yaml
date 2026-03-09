@@ -1,0 +1,22 @@
+version: 2
+commands:
+  print_job:
+    run:
+      program: python
+      argv:
+        - -c
+        - "import sys; print(sys.argv[1])"
+        - $job.name
+pipelines:
+  foreach_ok:
+    steps:
+      - step: each_job
+        foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - print_job
+launchers:
+  run_foreach:
+    title: Foreach
+    use: foreach_ok

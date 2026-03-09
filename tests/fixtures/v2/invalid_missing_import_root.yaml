@@ -1,0 +1,12 @@
+version: 2
+imports:
+  missing_pack: ./packs/does_not_exist.yaml
+commands:
+  root_cmd:
+    run:
+      program: python
+      argv: [-V]
+launchers:
+  root:
+    title: Root
+    use: root_cmd

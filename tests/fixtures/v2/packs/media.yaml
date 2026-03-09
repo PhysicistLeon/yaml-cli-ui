@@ -1,0 +1,12 @@
+version: 2
+imports:
+  fs: ./fs.yaml
+locals:
+  scrape_script: scripts/scrape.py
+commands:
+  media_info:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('media')"

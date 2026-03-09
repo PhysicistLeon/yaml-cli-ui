@@ -1,0 +1,21 @@
+version: 2
+commands:
+  fail_cmd:
+    run:
+      program: python
+      argv: [-c, "import sys; sys.exit(8)"]
+  recover_cmd:
+    run:
+      program: python
+      argv: [-c, "print('recovered')"]
+pipelines:
+  recoverable:
+    steps:
+      - fail_cmd
+    on_error:
+      steps:
+        - recover_cmd
+launchers:
+  run_recoverable:
+    title: Recoverable
+    use: recoverable

@@ -1,0 +1,27 @@
+version: 2
+imports:
+  media: ./packs/media.yaml
+  fs: ./packs/fs.yaml
+profiles:
+  home:
+    workdir: /work
+params:
+  collection:
+    type: string
+    default: incoming
+locals:
+  media_script: $media.locals.scrape_script
+  run_root: "${profile.workdir}/runs/${params.collection}"
+  spool_dir: "${locals.run_root}/spool"
+  urls_file: "${locals.spool_dir}/urls.json"
+  ensure_script: $fs.locals.ensure_dir_script
+launchers:
+  noop:
+    title: Noop
+    use: noop_command
+commands:
+  noop_command:
+    run:
+      program: python
+      argv:
+        - -V
