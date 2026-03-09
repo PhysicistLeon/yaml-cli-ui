@@ -5,6 +5,12 @@ profiles:
     runtimes:
       python: "python"
 
+params:
+    username:
+      type: string
+      default: "Leon"
+
+
 commands:
   hello_command:
     run:
@@ -13,7 +19,19 @@ commands:
         - -c
         - "print('hello from v2')"
 
+  hello_username:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('hello from v2 to ${params.username}')"
+
 launchers:
-  hello:
-    title: Hello v2
+  hello1:
+    title: Hello
+    info: Simple hello message
     use: hello_command
+  hello2:
+    title: Hello with name
+    info: Simple hello message with username
+    use: hello_username
