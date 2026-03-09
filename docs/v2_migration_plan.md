@@ -48,3 +48,29 @@ The `yaml_cli_ui/v2/models.py` module now defines a stable dataclass-based core 
 Core fields are intentionally strict where cheap invariants help (`RunSpec.program`, launcher required fields, non-empty foreach/on_error step lists) and intentionally permissive where later stages need flexibility (`locals: dict[str, Any]`, `argv: list[Any]`, expression-bearing fields typed as `Any`).
 
 Not modeled deeply yet: full YAML parsing rules, import graph resolution, expression evaluation semantics, argv DSL typing/validation, and execution orchestration details.
+
+## Step 11: AppV2 launcher-oriented UI
+
+Implemented a side-by-side v2 UI without breaking legacy v1 app:
+
+- Added `yaml_cli_ui/app_v2.py` with `AppV2` and thin `run_launcher(...)` wrapper over existing v2 core (`build_runtime_context` + `execute_callable_name`).
+- Extracted reusable UI helpers from legacy area into new modules:
+  - `yaml_cli_ui/ui/form_widgets.py` — param-driven form widgets, collection/validation, apply-values.
+  - `yaml_cli_ui/ui/log_views.py` — `StepResult` text renderer for command/pipeline/foreach/recovered outputs.
+  - `yaml_cli_ui/ui/history.py` — in-memory run history store and labels for selector widgets.
+  - `yaml_cli_ui/ui/status.py` — shared status color mapping reused by legacy `app.py` and AppV2.
+
+Launcher-oriented behavior (conservative mode):
+- Form fields are built from root `params` excluding keys fixed by `launcher.with`.
+- `launcher.with` values are shown as fixed read-only values in dialog (secrets masked as `***`).
+- Profile selector behavior:
+  - no profiles -> hidden
+  - one profile -> auto-selected
+  - many profiles -> combobox selector
+- Execution is always in background thread; completion updates status/history/log tabs on Tk thread via `after(...)`.
+
+Intentional non-goals in this step:
+- no launcher persistence/presets/state migration
+- no parallel execution
+- no core semantics changes beyond thin AppV2 wiring
+- run history/status kept in-memory only for current UI session.
