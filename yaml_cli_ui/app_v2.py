@@ -19,6 +19,7 @@ LauncherDialog :=
 
 from __future__ import annotations
 
+import argparse
 import threading
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,9 @@ from .v2.errors import V2Error
 from .v2.loader import load_v2_document
 from .v2.models import ParamDef, ParamType, SecretSource, StepResult, V2Document
 from .v2.persistence import LauncherPersistenceService
+
+
+DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 
 
 def resolve_profile_ui_state(doc: V2Document) -> tuple[bool, str | None, list[str]]:
@@ -423,3 +427,28 @@ class AppV2(tk.Tk):
         w = self.log_widgets[tab]
         w.insert("end", text + "\n")
         w.see("end")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="YAML-driven CLI UI (v2)")
+    parser.add_argument("config", nargs="?", default=None)
+    parser.add_argument(
+        "--settings",
+        help="Path to INI file with [ui] default_yaml.",
+        default="app.ini",
+    )
+    args = parser.parse_args()
+
+    # Reuse existing settings parser for compatibility with app.ini files.
+    from .app import load_launch_settings
+
+    settings = load_launch_settings(args.settings)
+    default_config = settings["default_yaml"] or Path(DEFAULT_CONFIG_PATH)
+    config_path = Path(args.config) if args.config else default_config
+
+    app = AppV2(str(config_path))
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
