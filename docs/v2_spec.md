@@ -215,7 +215,24 @@ result model:
   expose statuses: success | failed | skipped | recovered
 ```
 
-## 6) YAML pitfalls and practical workarounds
+
+## 6) Compatibility and routing facts (implemented)
+
+- App routing is version-based at config open time:
+  - `version: 1` -> legacy app stack
+  - `version: 2` -> `AppV2` + v2 core
+- v2 persistence filenames are:
+  - `<config>.launchers.presets.json`
+  - `<config>.state.json`
+- Imported v2 docs are restricted to reusable library sections:
+  - allowed: `locals`, `commands`, `pipelines`
+  - forbidden: `profiles`, `launchers`
+- Root/import locals are evaluated in declaration order; forward local references fail validation.
+- Callable namespace must be collision-free across `commands` and `pipelines`.
+- YAML key `with` maps to internal model field `with_values`.
+- Step result statuses are: `success`, `failed`, `skipped`, `recovered`.
+
+## 7) YAML pitfalls and practical workarounds
 
 - `yes/no/on/off` can be parsed as booleans by YAML 1.1 style loaders; quote when string is intended.
 - Windows paths should be quoted (e.g. `"C:\\tools\\python.exe"`) to avoid escape/colon ambiguity.
@@ -224,7 +241,7 @@ result model:
 - Escape dollar literals with `$$` or `$${...}` when literal `$` is needed.
 - YAML anchors/aliases are loader features only; they are not first-class DSL semantics.
 
-## 7) Known limitations / intentionally deferred
+## 8) Known limitations / intentionally deferred
 
 - No `parallel` execution block.
 - No `param_imports` model.

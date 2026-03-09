@@ -34,6 +34,8 @@ This guide is for manual migration in a side-by-side repository where both versi
 
 ## 4) Before/after examples
 
+> Notes: these migration snippets are intentionally simplified and should be adapted to your real workflow (paths, profiles, secrets, and environment details).
+
 ### 4.1 Minimal command
 
 **v1**
@@ -105,8 +107,10 @@ version: 1
 actions:
   ingest:
     pipeline:
-      - id: fetch
-        run: { program: python, argv: [scripts/fetch.py] }
+      - id: scrape_a
+        run: { program: python, argv: [scripts/scrape.py, a] }
+      - id: scrape_b
+        run: { program: python, argv: [scripts/scrape.py, b] }
 ```
 
 **v2-lite (imported reusable callables/locals)**
@@ -118,7 +122,7 @@ imports:
 launchers:
   ingest:
     title: Ingest
-    use: media.fetch_pipeline
+    use: media.scrape_all
 ```
 
 ### 4.4 Batch / foreach
@@ -127,16 +131,23 @@ launchers:
 
 ```yaml
 version: 1
+vars:
+  items:
+    - alpha
+    - beta
 actions:
   batch:
+    title: Batch
     pipeline:
       - id: each
         foreach:
-          in: ${form.items}
+          in: "${vars.items}"
           as: item
           pipeline:
             - id: run
-              run: { program: python, argv: [-c, "print('${item}')"] }
+              run:
+                program: python
+                argv: [-c, "import sys; print(sys.argv[1])", "${item}"]
 ```
 
 **v2-lite**

@@ -16,7 +16,7 @@ YAML CLI UI now supports **side-by-side config versions**:
 python main.py examples/yt_audio.yaml
 python main.py examples/v2_minimal.yaml
 
-# or resolve startup config from ini
+# or resolve startup config from ini ([ui] default_yaml + browse_dir)
 python main.py --settings app.ini
 ```
 
@@ -53,6 +53,13 @@ v2-lite provides:
 - Legacy v1: `examples/yt_audio.yaml`
 - Minimal v2: `examples/v2_minimal.yaml`
 - Fuller v2 demo: `examples/v2_ingest_demo.yaml`
+
+
+## Legacy bridge (for existing v1 users)
+
+- Existing `version: 1` configs remain supported; no immediate rewrite is required.
+- Keep using legacy reference docs for v1 syntax/behavior: `docs/yaml_pipeline_reference.md`.
+- Migrate only when needed, using `docs/v1_to_v2_migration.md` as a manual checklist.
 
 ## Migration docs
 

@@ -1,3 +1,6 @@
+# Legacy v1 example alias for migration docs/smoke checks.
+# Source-equivalent to examples/yt_audio.yaml.
+
 version: 1
 
 # UI note:
