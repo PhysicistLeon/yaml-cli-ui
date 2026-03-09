@@ -48,3 +48,43 @@ The `yaml_cli_ui/v2/models.py` module now defines a stable dataclass-based core 
 Core fields are intentionally strict where cheap invariants help (`RunSpec.program`, launcher required fields, non-empty foreach/on_error step lists) and intentionally permissive where later stages need flexibility (`locals: dict[str, Any]`, `argv: list[Any]`, expression-bearing fields typed as `Any`).
 
 Not modeled deeply yet: full YAML parsing rules, import graph resolution, expression evaluation semantics, argv DSL typing/validation, and execution orchestration details.
+
+## Step 11: AppV2 launcher-oriented UI
+
+Implemented a side-by-side v2 UI without breaking legacy v1 app.
+
+- Added `yaml_cli_ui/app_v2.py` with `AppV2` and thin `run_launcher(...)` wrapper over existing v2 core (`build_runtime_context` + `execute_callable_name`).
+- Extracted reusable UI helpers into:
+  - `yaml_cli_ui/ui/form_widgets.py` — param-driven form widgets, collection/validation, apply-values, secret source handling.
+  - `yaml_cli_ui/ui/log_views.py` — `StepResult` text renderer + explicit secret redaction.
+  - `yaml_cli_ui/ui/history.py` — in-memory run history store and labels for selector widgets.
+  - `yaml_cli_ui/ui/status.py` — shared status color mapping reused by legacy `app.py` and AppV2.
+
+Launcher-oriented behavior (conservative collection rule):
+- `launcher_param_plan(...)` returns:
+  - `fixed = launcher.with_values`
+  - `editable = root params` minus keys fixed by `launcher.with_values`.
+- Fixed bindings are rendered read-only; secret fixed values are masked.
+- Profile selector behavior via `resolve_profile_ui_state(...)`:
+  - no profiles -> hidden
+  - one profile -> auto-selected
+  - many profiles -> combobox selector.
+
+Auto-run rule without dialog:
+- launcher starts immediately when **all** editable params are already resolved from one of:
+  - param `default`
+  - secret source `env`
+  - secret source `vault`
+- otherwise dialog is opened for remaining user input.
+
+Security/logging notes:
+- plaintext secret values are masked in fixed/read-only UI representation.
+- `render_step_result_text(...)` redacts secret values from rendered logs (`stdout`/`stderr`/error text).
+
+In this step state is intentionally in-memory only:
+- run history and launcher status are not persisted.
+
+Intentional non-goals in this step:
+- no launcher persistence/presets/state migration
+- no parallel execution
+- no core semantics changes beyond thin AppV2 wiring.

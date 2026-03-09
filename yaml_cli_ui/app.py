@@ -28,11 +28,13 @@ from .engine import (
 from .presets import PresetError, PresetService
 
 
-IDLE_COLOR = "#d9d9d9"
-RUNNING_COLOR = "#f1c40f"
-SUCCESS_COLOR = "#2ecc71"
-FAILED_COLOR = "#e74c3c"
-RECOVERED_COLOR = "#f39c12"
+from .ui.status import (
+    FAILED_COLOR,
+    IDLE_COLOR,
+    RECOVERED_COLOR,
+    RUNNING_COLOR,
+    SUCCESS_COLOR,
+)
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 STATE_FILE_PATH = Path.home() / ".yaml_cli_ui" / "state.json"
 TOOLTIP_DELAY_MS = 500
