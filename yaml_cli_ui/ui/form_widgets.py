@@ -68,7 +68,7 @@ def _safe_float(value: Any, fallback: float) -> float:
         return fallback
 
 
-def _slider_decimals(param: ParamDef, step: float) -> int:
+def _slider_decimals(param: ParamDef) -> int:
     if param.type == ParamType.INT:
         return 0
     if param.step in (None, ""):
@@ -107,7 +107,7 @@ def _create_numeric_slider(parent: tk.Widget, param: ParamDef, value: Any) -> tt
     if step <= 0:
         step = 1.0
 
-    decimals = _slider_decimals(param, step)
+    decimals = _slider_decimals(param)
     if param.type == ParamType.INT:
         var: tk.Variable = tk.IntVar(value=int(minimum))
     else:

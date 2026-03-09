@@ -1,3 +1,5 @@
+# pylint: disable=import-error
+
 import tkinter as tk
 
 import pytest

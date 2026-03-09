@@ -1,4 +1,4 @@
-# pylint: disable=import-error,protected-access,redefined-outer-name
+# pylint: disable=import-error,protected-access,redefined-outer-name,too-many-lines
 
 import sys
 import time
@@ -1053,7 +1053,7 @@ launchers:
     try:
         collected = {}
 
-        def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        def fake_create(_parent, _params, *, _initial_values=None, fixed_values=None):
             collected["fixed"] = dict(fixed_values or {})
             return {"username": FormField("username", ParamDef(type=ParamType.STRING), tk.Entry(_parent))}
 
