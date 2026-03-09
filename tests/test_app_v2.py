@@ -373,7 +373,7 @@ launchers:
 
         monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
         app.start_launcher("l")
-        assert calls == []
+        assert not calls
         assert created["count"] == 1
     finally:
         app.destroy()
@@ -430,7 +430,7 @@ launchers:
 
         monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
         app.start_launcher("l")
-        assert calls == []
+        assert not calls
         assert created["count"] == 1
     finally:
         app.destroy()
@@ -487,7 +487,7 @@ launchers:
         monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
         app.start_launcher("l")
 
-        assert calls == []
+        assert not calls
         assert created["count"] == 1
         assert captured["fixed_values"] == {"collection": "fixed"}
         assert captured["initial_values"] == {}
@@ -681,7 +681,7 @@ launchers:
         monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
         app.start_launcher("l")
 
-        assert calls == []
+        assert not calls
         assert created["count"] == 1
         assert captured["initial_values"]["username"] == "preset_user"
         assert captured["fixed_values"] == {"collection": "fixed_collection"}
