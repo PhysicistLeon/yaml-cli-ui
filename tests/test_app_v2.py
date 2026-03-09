@@ -12,8 +12,10 @@ from yaml_cli_ui.app_v2 import (
     collect_used_params_for_launcher,
     launcher_param_plan,
     resolve_profile_ui_state,
+    materialize_launcher_params,
     run_launcher,
 )
+from yaml_cli_ui.v2.errors import V2ExpressionError
 from yaml_cli_ui.v2.loader import load_v2_document
 from yaml_cli_ui.v2.persistence import save_v2_presets, save_v2_state
 from yaml_cli_ui.v2.models import (
@@ -24,6 +26,7 @@ from yaml_cli_ui.v2.models import (
     ParamDef,
     ParamType,
     ProfileDef,
+    SecretSource,
     RunSpec,
     StepSpec,
     V2Document,
@@ -161,6 +164,98 @@ def test_collect_used_params_for_pipeline_nested_graph():
     assert used == {"source_url", "collection"}
 
 
+
+
+def test_materialize_launcher_params_precedence():
+    doc = V2Document(
+        params={"username": ParamDef(type=ParamType.STRING, default="Leon")},
+        commands={"hello": CommandDef(run=RunSpec(program="echo", argv=["$params.username"]))},
+        launchers={"l": LauncherDef(title="L", use="hello", with_values={"username": "Dave"})},
+    )
+
+    merged = materialize_launcher_params(
+        doc,
+        "l",
+        state_values={"username": "Alice", "unknown": "state"},
+        preset_values={"username": "Bob", "unknown": "preset"},
+        user_values={"username": "Carol", "unknown": "user"},
+    )
+
+    assert merged["username"] == "Dave"
+    assert "unknown" not in merged
+
+
+
+
+def test_default_materialization_does_not_resolve_secret_sources():
+    doc = V2Document(
+        params={
+            "plain": ParamDef(type=ParamType.STRING, default="Leon"),
+            "env_secret": ParamDef(type=ParamType.SECRET, source=SecretSource.ENV, env="APP_SECRET"),
+            "vault_secret": ParamDef(type=ParamType.SECRET, source=SecretSource.VAULT),
+            "explicit_secret_default": ParamDef(type=ParamType.SECRET, default="keep-me"),
+        },
+        commands={"hello": CommandDef(run=RunSpec(program="echo", argv=["ok"]))},
+        launchers={"l": LauncherDef(title="L", use="hello")},
+    )
+
+    merged = materialize_launcher_params(doc, "l")
+
+    assert merged == {"plain": "Leon", "explicit_secret_default": "keep-me"}
+def test_run_launcher_materializes_root_default_without_with(tmp_path):
+    path = tmp_path / "default_param.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+    default: Leon
+commands:
+  hello_username:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('hello from v2 to ${{params.username}}')"]
+launchers:
+  hello2:
+    title: Hello with name
+    use: hello_username
+""",
+        encoding="utf-8",
+    )
+
+    doc = load_v2_document(path)
+    result = run_launcher(doc, "hello2", {})
+
+    assert result.status.value == "success"
+    assert "hello from v2 to Leon" in (result.stdout or "")
+
+
+def test_run_launcher_missing_required_param_without_default_fails(tmp_path):
+    path = tmp_path / "required_param.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+    required: true
+commands:
+  hello_username:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('hello from v2 to ${{params.username}}')"]
+launchers:
+  hello2:
+    title: Hello with name
+    use: hello_username
+""",
+        encoding="utf-8",
+    )
+
+    doc = load_v2_document(path)
+    with pytest.raises(V2ExpressionError, match="username"):
+        run_launcher(doc, "hello2", {})
 def test_run_launcher_executes(v2_yaml):
     doc = load_v2_document(v2_yaml)
 
