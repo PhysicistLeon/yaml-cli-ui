@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from time import perf_counter
@@ -92,7 +93,12 @@ def resolve_workdir(run_spec: RunSpec, context: Mapping[str, Any]) -> str | None
     return rendered
 
 
-def build_process_env(run_spec: RunSpec, context: Mapping[str, Any]) -> dict[str, str]:
+def build_process_env(
+    run_spec: RunSpec,
+    context: Mapping[str, Any],
+    *,
+    resolved_program: str | None = None,
+) -> dict[str, str]:
     """Build effective process env with deterministic merge order."""
 
     merged: dict[str, str] = dict(os.environ)
@@ -106,7 +112,40 @@ def build_process_env(run_spec: RunSpec, context: Mapping[str, Any]) -> dict[str
             _merge_env_map(merged, profile_env, context, source_label="profile.env", render_values=False)
 
     _merge_env_map(merged, run_spec.env, context, source_label="run.env", render_values=True)
+
+    # Legacy v1 compatibility: when running as a frozen app (PyInstaller-like),
+    # launching a Python child can inherit _MEI*/Tcl/Tk env pointers from parent.
+    # Those pointers break child tkinter initialization (init.tcl/version mismatch).
+    program_for_sanitization = resolved_program or run_spec.program
+    if getattr(sys, "frozen", False) and _looks_like_python_program(program_for_sanitization):
+        merged = _sanitize_child_env_for_embedded_tk(merged)
+
     return merged
+
+
+# NOTE: Intentionally mirrored from legacy v1 for frozen-parent/python-child
+# compatibility behavior.
+# pylint: disable=duplicate-code
+def _looks_like_python_program(program: str) -> bool:
+    normalized = str(program).replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1].lower()
+    return name in {"python", "python.exe", "python3", "python3.exe"}
+
+
+def _sanitize_child_env_for_embedded_tk(env: dict[str, str]) -> dict[str, str]:
+    sanitized = dict(env)
+    for key in (
+        "TCL_LIBRARY",
+        "TK_LIBRARY",
+        "TCLLIBPATH",
+        "PYTHONHOME",
+        "PYTHONPATH",
+    ):
+        sanitized.pop(key, None)
+    for key, value in list(sanitized.items()):
+        if isinstance(value, str) and "_MEI" in value:
+            sanitized.pop(key, None)
+    return sanitized
 
 
 def resolve_callable(doc: V2Document, callable_name: str) -> CommandDef | PipelineDef:
@@ -468,7 +507,7 @@ def execute_run_spec(
     program = resolve_program(run_spec.program, context)
     argv = serialize_argv(run_spec.argv, context)
     workdir = resolve_workdir(run_spec, context)
-    env = build_process_env(run_spec, context)
+    env = build_process_env(run_spec, context, resolved_program=program)
 
     stdout_mode, stdout_target = _parse_stream_mode(run_spec.stdout, context, stream_name="stdout")
     stderr_mode, stderr_target = _parse_stream_mode(run_spec.stderr, context, stream_name="stderr")
