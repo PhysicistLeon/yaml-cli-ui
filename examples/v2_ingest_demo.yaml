@@ -1,0 +1,52 @@
+version: 2
+
+imports:
+  media: ./packs/v2_media_pack.yaml
+
+profiles:
+  local:
+    workdir: .
+    runtimes:
+      python: python
+
+params:
+  url:
+    type: string
+    required: true
+  urls:
+    type: multichoice
+    default: []
+  output_dir:
+    type: dirpath
+    default: .
+  token:
+    type: secret
+    source: env
+    env: DEMO_TOKEN
+
+locals:
+  effective_dir: "${$params.output_dir}"
+
+commands:
+  summarize:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('done', '${$locals.effective_dir}')"
+
+pipelines:
+  ingest:
+    steps:
+      - use: media.shared_fetch
+      - use: summarize
+    on_error:
+      steps:
+        - use: summarize
+
+launchers:
+  ingest_default:
+    title: Ingest demo
+    use: ingest
+    with:
+      output_dir: ./out

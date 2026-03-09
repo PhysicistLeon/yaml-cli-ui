@@ -11,7 +11,7 @@ from .settings import load_launch_settings
 
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 
-SUPPORTED_CONFIG_VERSIONS = {1, 2}
+SUPPORTED_CONFIG_VERSIONS = {1, 2}  # side-by-side: legacy v1 + current v2-lite
 
 
 class ConfigRoutingError(Exception):

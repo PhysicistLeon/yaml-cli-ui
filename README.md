@@ -4,142 +4,72 @@
 [![Ruff](https://img.shields.io/github/actions/workflow/status/PhysicistLeon/yaml-cli-ui/lint.yml?branch=main&label=ruff)](https://github.com/PhysicistLeon/yaml-cli-ui/actions/workflows/lint.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/PhysicistLeon/yaml-cli-ui/main/coverage-badge.json)](./coverage-badge.json)
 
-Python app that loads workflow YAML, renders top-level actions as launch buttons, opens per-action parameter dialogs, serializes argv deterministically, and executes CLI pipelines with safe `subprocess.run(..., shell=False)` defaults.
+YAML CLI UI now supports **two config generations side-by-side**:
 
-## Run
+- **v1 legacy** (`version: 1`) — action-centric model (`actions`, legacy engine/UI/storage).
+- **v2-lite current** (`version: 2`) — launcher-centric model (`launchers`, `commands`, `pipelines`, `params`, `locals`, `imports`, `profiles`) with dedicated v2 persistence.
+
+## Quick start
 
 ```bash
-python main.py examples/yt_audio.yaml
-# or with startup settings from ini
+python main.py examples/yt_audio.yaml         # v1 legacy example
+python main.py examples/v2_minimal.yaml       # v2-lite example
+python main.py examples/v2_ingest_demo.yaml   # fuller v2-lite example
+```
+
+Routing is automatic and explicit by top-level `version`:
+
+- `version: 1` -> `yaml_cli_ui.app.App` (legacy v1)
+- `version: 2` -> `yaml_cli_ui.app_v2.AppV2` (v2 stack)
+
+## What is legacy v1
+
+Legacy v1 keeps the original contract and behavior:
+
+- action-centric YAML (`actions`, `vars`, legacy args DSL);
+- legacy engine/app modules (`yaml_cli_ui/app.py`, `yaml_cli_ui/engine.py`, `yaml_cli_ui/presets.py`);
+- legacy presets/state shape (`<yaml>.presets.json`).
+
+No auto-rewrite or semantics rewrite is performed in this migration step.
+
+## What is current v2-lite
+
+v2-lite is the current migration target:
+
+- `launchers` as UI entry points;
+- reusable callable graph: `commands` + `pipelines` (+ `imports`);
+- root-level `params`, ordered `locals`, and optional `profiles`;
+- explicit context namespaces (`$params`, `$locals`, `$profile`, `$steps`, `$run`, `$loop`, `$error`);
+- dedicated v2 persistence files for launcher presets and last values.
+
+## Running with startup settings
+
+```bash
 python main.py --settings app.ini
 ```
 
-## Features
-
-- Top-level actions rendered as quick-launch buttons (no action dropdown).
-- Optional `actions.<id>.info` tooltip on action buttons (shown on hover with delay).
-- Action parameters are entered in a modal dialog per run.
-- Last entered action parameters are remembered between app restarts (per YAML config and action, excluding `secret` fields) and prefilled on next run.
-- Named presets per action (create/overwrite/rename/delete) stored next to YAML in `<yaml>.presets.json`.
-- Last run behavior supports snapshot or reference to the last launched named preset.
-- Preset compatibility warnings show unused parameters when YAML form fields changed.
-- Parallel action runs with status colors: idle=neutral, running=yellow, success=green, failed=red.
-- Output notebook with aggregate `All runs` stream plus per-action tabs.
-- Per-action run history selector to inspect past outputs.
-- Supported steps: `run`, nested `pipeline`, `foreach`.
-- Safe expression evaluator for `${...}` templates.
-- Deterministic argv serialization (string/short-map/extended-option forms).
-- Step result storage (`exit_code/stdout/stderr/duration_ms`) with recovery namespace keys (`_recovery.<step_id>`).
-- Optional `on_error` action block with `${error.*}` context (`step_id`, `exit_code`, `message`, `type`).
-- Recovered action status is shown in orange (`recovered`).
-- YAML reload button in UI.
-
-## Documentation
-
-- YAML/engine reference: `docs/yaml_pipeline_reference.md`
-- Architecture/context reference: `docs/context.md`
-
-## Presets JSON (`<yaml>.presets.json`)
-
-Action argument values can be stored and reused via a JSON file placed next to the selected YAML config.
-
-Path rule:
-
-- If config is `workflow.yaml`, presets file is `workflow.yaml.presets.json`.
-
-Behavior:
-
-- Stores named presets per action.
-- Stores last-run state as snapshot or reference to a named preset.
-- Ignores removed/unknown form fields when applying old presets and shows a compatibility warning.
-- Excludes fields with `type: secret` from persisted values.
-
-Minimal file example:
-
-```json
-{
-  "version": 1,
-  "actions": {
-    "build": {
-      "presets": {
-        "smoke": {
-          "values": {
-            "target": "tests",
-            "verbose": true
-          }
-        }
-      },
-      "last_run": {
-        "mode": "preset_ref",
-        "preset_name": "smoke"
-      }
-    }
-  }
-}
-```
-
-
-
-## on_error demo
-
-A minimal runnable demo for the new recovery behavior is included:
-
-```bash
-python main.py examples/on_error_demo.yaml
-```
-
-This action intentionally fails, then runs `on_error` cleanup and passes `${error.*}` context to cleanup script.
-
-## Runtime aliases
-
-You can define runtime-level executable overrides, for example for Python:
-
-```yaml
-runtime:
-  python:
-    executable: "C:\\code\\Python\\.venvs\\stable3_12_4\\Scripts\\python.exe"
-
-actions:
-  run_script:
-    title: "Run Python script"
-    info: "Run process.py using configured runtime.python.executable"
-    pipeline:
-      - id: run
-        run:
-          program: python
-          argv:
-            - "scripts\\process.py"
-```
-
-When `program: python` is used in a step, the configured `runtime.python.executable` is used instead.
-
-
-## UI flow
-
-1. Click any action button on the main screen.
-2. If the action has editable parameters, fill them in the modal dialog and press **Run**.
-3. If the action has no editable parameters, it starts immediately without opening a dialog.
-4. If validation fails, run does not start and button status color is unchanged.
-5. While action is running, its button is yellow.
-6. After completion, button turns green on success or red on failure.
-7. Inspect logs in `All runs` (aggregate) or the action-specific tab/history.
-
-
-## INI startup settings
-
-You can provide a `--settings` ini file to define:
-
-- which YAML should be loaded by default on startup;
-- which folder should open first when pressing **Browse**.
-
-Example `app.ini`:
+`app.ini` may define default YAML and browse directory:
 
 ```ini
 [ui]
-default_yaml = examples/yt_audio.yaml
+default_yaml = examples/v2_minimal.yaml
 browse_dir = examples
 ```
 
-A ready-to-use example is included in the repo: `examples/app.ini`.
+## Migration docs
 
-Relative paths in ini are resolved relative to the ini file location.
+- v2-lite reference spec: `docs/v2_spec.md`
+- v1 -> v2 manual migration guide: `docs/v1_to_v2_migration.md`
+- examples guide: `docs/v2_examples.md`
+- routing details: `docs/v1_v2_routing.md`
+- v2 persistence details: `docs/v2_persistence.md`
+
+## Intentionally deferred / not implemented
+
+These are deliberately out of scope right now:
+
+- `parallel` execution;
+- `param_imports` model;
+- auto-migration converter (config or storage) from v1 to v2;
+- richer public foreach result addressing beyond current runtime model;
+- importing `launchers`, `profiles`, or `params` as library sections.

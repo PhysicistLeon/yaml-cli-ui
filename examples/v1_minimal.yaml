@@ -1,0 +1,10 @@
+version: 1
+
+actions:
+  python_version:
+    title: Python version (v1)
+    pipeline:
+      - id: py_v
+        run:
+          program: python
+          argv: ["-V"]
