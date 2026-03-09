@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from yaml_cli_ui.v2.executor import (
+    _looks_like_python_program,
+    _sanitize_child_env_for_embedded_tk,
     build_process_env,
     execute_command_def,
     execute_run_spec,
@@ -68,6 +71,113 @@ def test_build_process_env_merge_and_rendering(monkeypatch: pytest.MonkeyPatch):
     assert env["RUN_NAME"] == "demo"
     assert env["RUN_BOOL"] == "True"
     assert env["SHARED"] == "run"
+
+
+def test_looks_like_python_program_detection():
+    assert _looks_like_python_program("python")
+    assert _looks_like_python_program("python.exe")
+    assert _looks_like_python_program(r"C:/venv/Scripts/python.exe")
+    assert _looks_like_python_program(r"C:\venv\Scripts\python.exe")
+    assert _looks_like_python_program("python3")
+    assert not _looks_like_python_program("py")
+    assert not _looks_like_python_program("node")
+
+
+def test_sanitize_child_env_for_embedded_tk():
+    env = {
+        "PATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345;C:\Windows\System32",
+        "TCL_LIBRARY": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tcl_data",
+        "TK_LIBRARY": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tk_data",
+        "PYTHONHOME": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345",
+        "PYTHONPATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345",
+        "TCLLIBPATH": r"C:\Users\Astra\AppData\Local\Temp\_MEI12345\_tcl_data",
+        "SYSTEMROOT": r"C:\Windows",
+    }
+
+    sanitized = _sanitize_child_env_for_embedded_tk(env)
+
+    assert "PATH" not in sanitized
+    assert "TCL_LIBRARY" not in sanitized
+    assert "TK_LIBRARY" not in sanitized
+    assert "PYTHONHOME" not in sanitized
+    assert "PYTHONPATH" not in sanitized
+    assert "TCLLIBPATH" not in sanitized
+    assert sanitized["SYSTEMROOT"] == r"C:\Windows"
+
+
+def test_execute_run_spec_sanitizes_env_for_frozen_python_child_with_runtime_alias(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured_env: dict[str, str] = {}
+
+    def _fake_run(*args, **kwargs):
+        captured_env.update(kwargs["env"])
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("yaml_cli_ui.v2.executor.subprocess.run", _fake_run)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    context = _ctx()
+    context["profile"]["runtimes"]["py312"] = r"C:\Python312\python.exe"
+
+    run = RunSpec(
+        program="py312",
+        argv=["-c", "print('ok')"],
+        env={
+            "PATH": r"C:\Temp\_MEI12345;C:\Windows\System32",
+            "TCL_LIBRARY": r"C:\Temp\_MEI12345\_tcl_data",
+            "SYSTEMROOT": r"C:\Windows",
+        },
+    )
+
+    result = execute_run_spec(run, context=context, step_name="python")
+
+    assert result.status == StepStatus.SUCCESS
+    assert "PATH" not in captured_env
+    assert "TCL_LIBRARY" not in captured_env
+    assert captured_env["SYSTEMROOT"] == r"C:\Windows"
+
+
+def test_execute_run_spec_does_not_sanitize_for_frozen_non_python_child(monkeypatch: pytest.MonkeyPatch):
+    captured_env: dict[str, str] = {}
+
+    def _fake_run(*args, **kwargs):
+        captured_env.update(kwargs["env"])
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("yaml_cli_ui.v2.executor.subprocess.run", _fake_run)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    run = RunSpec(
+        program="node",
+        argv=["-e", "console.log('ok')"],
+        env={"PATH": r"C:\Temp\_MEI12345;C:\Windows\System32"},
+    )
+
+    execute_run_spec(run, context=_ctx(), step_name="node")
+
+    assert captured_env["PATH"] == r"C:\Temp\_MEI12345;C:\Windows\System32"
+
+
+def test_execute_run_spec_does_not_sanitize_when_not_frozen(monkeypatch: pytest.MonkeyPatch):
+    captured_env: dict[str, str] = {}
+
+    def _fake_run(*args, **kwargs):
+        captured_env.update(kwargs["env"])
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("yaml_cli_ui.v2.executor.subprocess.run", _fake_run)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    run = RunSpec(
+        program="python",
+        argv=["-c", "print('ok')"],
+        env={"PATH": r"C:\Temp\_MEI12345;C:\Windows\System32"},
+    )
+
+    execute_run_spec(run, context=_ctx(), step_name="python")
+
+    assert captured_env["PATH"] == r"C:\Temp\_MEI12345;C:\Windows\System32"
 
 
 def test_simple_success_execution():
