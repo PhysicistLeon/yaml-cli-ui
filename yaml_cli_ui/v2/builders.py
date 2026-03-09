@@ -90,6 +90,7 @@ def _build_params(raw_doc: dict[str, Any], source_path: Path) -> dict[str, Param
             required=bool(entry.get("required", False)),
             default=entry.get("default"),
             options=entry.get("options") if isinstance(entry.get("options"), list) else None,
+            widget=entry.get("widget") if isinstance(entry.get("widget"), str) else None,
             min=entry.get("min"),
             max=entry.get("max"),
             step=entry.get("step"),

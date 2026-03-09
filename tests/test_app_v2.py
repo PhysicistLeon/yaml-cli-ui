@@ -16,8 +16,10 @@ from yaml_cli_ui.app_v2 import (
     resolve_profile_ui_state,
     materialize_launcher_params,
     run_launcher,
+    split_preset_values_for_launcher,
     should_open_launcher_dialog,
 )
+from yaml_cli_ui.ui.form_widgets import FormField
 from yaml_cli_ui.v2.errors import V2ExpressionError
 from yaml_cli_ui.v2.loader import load_v2_document
 from yaml_cli_ui.v2.persistence import save_v2_presets, save_v2_state
@@ -81,6 +83,37 @@ def _maybe_app(path):
         pytest.skip(f"Tk unavailable in environment: {exc}")
     app.withdraw()
     return app
+
+
+def _find_descendants_by_type(root: tk.Misc, widget_type: type[tk.Misc]) -> list[tk.Misc]:
+    found: list[tk.Misc] = []
+    for child in root.winfo_children():
+        if isinstance(child, widget_type):
+            found.append(child)
+        found.extend(_find_descendants_by_type(child, widget_type))
+    return found
+
+
+def _find_button_by_text(root: tk.Misc, text: str) -> ttk.Button | None:
+    for button in _find_descendants_by_type(root, ttk.Button):
+        if button.cget("text") == text:
+            return button
+    return None
+
+
+def _find_combobox(root: tk.Misc) -> ttk.Combobox | None:
+    combos = _find_descendants_by_type(root, ttk.Combobox)
+    return combos[0] if combos else None
+
+
+def _find_text_widget_in_labelframe(root: tk.Misc, frame_text: str) -> tk.Text | None:
+    for frame in _find_descendants_by_type(root, ttk.LabelFrame):
+        if frame.cget("text") != frame_text:
+            continue
+        texts = _find_descendants_by_type(frame, tk.Text)
+        if texts:
+            return texts[0]
+    return None
 
 
 def test_resolve_profile_ui_state():
@@ -841,5 +874,191 @@ launchers:
     try:
         assert len(calls) == 1
         assert "Using safe defaults" in calls[0][1]
+    finally:
+        app.destroy()
+
+
+def test_split_preset_values_reports_unused_fields():
+    used, unused = split_preset_values_for_launcher(
+        {"name": "alice", "ghost": 1, "other": 2},
+        {"name"},
+    )
+    assert used == {"name": "alice"}
+    assert unused == ["ghost", "other"]
+
+
+def test_launcher_dialog_shows_preset_controls_and_unused_warning(tmp_path):
+    path = tmp_path / "preset_controls.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.username"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    save_v2_presets(
+        path,
+        {
+            "version": 2,
+            "launchers": {
+                "l": {"presets": {"p": {"params": {"username": "u", "ghost": "x"}}}}
+            },
+        },
+    )
+    save_v2_state(
+        path,
+        {"version": 2, "selected_profile": None, "launchers": {"l": {"last_selected_preset": "p"}}},
+    )
+
+    app = _maybe_app(path)
+    try:
+        app.start_launcher("l")
+        app.update()
+        dialog = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)][-1]
+
+        assert _find_combobox(dialog) is not None
+        for text in ["Apply", "Save/Create", "Overwrite", "Rename", "Delete"]:
+            assert _find_button_by_text(dialog, text) is not None
+
+        warning_text = _find_text_widget_in_labelframe(dialog, "Unused preset fields")
+        assert warning_text is not None
+        assert "ghost" in warning_text.get("1.0", "end")
+        dialog.destroy()
+    finally:
+        app.destroy()
+
+
+def test_warning_block_refresh_for_select_delete_and_empty_selection(tmp_path, monkeypatch):
+    path = tmp_path / "preset_warning_refresh.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.username"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    save_v2_presets(
+        path,
+        {
+            "version": 2,
+            "launchers": {
+                "l": {
+                    "presets": {
+                        "only_unused": {"params": {"ghost": "x"}},
+                        "clean": {"params": {"username": "alice"}},
+                    }
+                }
+            },
+        },
+    )
+    save_v2_state(
+        path,
+        {
+            "version": 2,
+            "selected_profile": None,
+            "launchers": {"l": {"last_selected_preset": "only_unused"}},
+        },
+    )
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.messagebox.askyesno", lambda *args, **kwargs: True)
+
+    app = _maybe_app(path)
+    try:
+        app.start_launcher("l")
+        app.update()
+        dialog = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)][-1]
+        warning_text = _find_text_widget_in_labelframe(dialog, "Unused preset fields")
+        assert warning_text is not None
+        assert "ghost" in warning_text.get("1.0", "end")
+
+        combo = _find_combobox(dialog)
+        assert combo is not None
+        combo.set("clean")
+        combo.event_generate("<<ComboboxSelected>>")
+        app.update()
+        assert warning_text.get("1.0", "end").strip() == ""
+
+        combo.set("")
+        combo.event_generate("<<ComboboxSelected>>")
+        app.update()
+        assert warning_text.get("1.0", "end").strip() == ""
+
+        combo.set("only_unused")
+        combo.event_generate("<<ComboboxSelected>>")
+        app.update()
+        assert "ghost" in warning_text.get("1.0", "end")
+
+        delete_button = _find_button_by_text(dialog, "Delete")
+        assert delete_button is not None
+        delete_button.invoke()
+        app.update()
+        assert warning_text.get("1.0", "end").strip() == ""
+        dialog.destroy()
+    finally:
+        app.destroy()
+
+
+def test_preset_apply_does_not_override_launcher_with(tmp_path, monkeypatch):
+    path = tmp_path / "preset_fixed.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  username:
+    type: string
+  mode:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')", "$params.username", "$params.mode"]
+launchers:
+  l:
+    title: L
+    use: hello
+    with:
+      mode: fixed
+""",
+        encoding="utf-8",
+    )
+    save_v2_presets(
+        path,
+        {"version": 2, "launchers": {"l": {"presets": {"p": {"params": {"username": "u", "mode": "bad"}}}}}},
+    )
+
+    app = _maybe_app(path)
+    try:
+        collected = {}
+
+        def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+            collected["fixed"] = dict(fixed_values or {})
+            return {"username": FormField("username", ParamDef(type=ParamType.STRING), tk.Entry(_parent))}
+
+        monkeypatch.setattr("yaml_cli_ui.app_v2.create_v2_form_fields", fake_create)
+        app.start_launcher("l")
+        assert collected["fixed"] == {"mode": "fixed"}
     finally:
         app.destroy()

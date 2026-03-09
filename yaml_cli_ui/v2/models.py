@@ -83,6 +83,7 @@ class ParamDef:
     required: bool = False
     default: Any | None = None
     options: list[Any] | None = None
+    widget: str | None = None
     min: int | float | None = None
     max: int | float | None = None
     step: int | float | None = None

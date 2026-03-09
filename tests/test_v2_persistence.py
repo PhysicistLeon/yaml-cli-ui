@@ -110,6 +110,12 @@ def test_unknown_fields_ignored_on_apply_and_get_preset(tmp_path: Path):
     )
     service = LauncherPersistenceService(cfg, _doc())
     service.load_presets()
+    assert service.get_preset_raw_params("ingest", "p1") == {
+        "name": "alice",
+        "ghost": 1,
+        "token": "x",
+        "mode": "x",
+    }
     assert service.get_preset("ingest", "p1") == {"params": {"name": "alice"}}
     assert service.apply_preset_values("ingest", "p1") == {"name": "alice"}
 
