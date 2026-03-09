@@ -13,6 +13,12 @@ from .context import (
 )
 from .loader import load_v2_document, load_yaml_file, resolve_imports
 from .renderer import render_scalar_or_ref, render_string, render_value
+from .argv import (
+    is_conditional_item,
+    is_option_map,
+    serialize_argv,
+    serialize_argv_item,
+)
 from .models import (
     PUBLIC_API_MODELS,
     CommandDef,
@@ -63,6 +69,10 @@ __all__ = [
     "render_value",
     "render_string",
     "render_scalar_or_ref",
+    "serialize_argv",
+    "serialize_argv_item",
+    "is_option_map",
+    "is_conditional_item",
     "resolve_selected_profile",
     "build_base_context",
     "evaluate_root_locals",
