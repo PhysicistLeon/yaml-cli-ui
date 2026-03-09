@@ -47,6 +47,9 @@ def _secret_source_display(param: ParamDef) -> str:
     return ""
 
 
+LONG_ENTRY_WIDTH = 60
+
+
 def create_v2_form_fields(
     parent: tk.Widget,
     params: dict[str, ParamDef],
@@ -54,16 +57,27 @@ def create_v2_form_fields(
     initial_values: dict[str, Any] | None = None,
     fixed_values: dict[str, Any] | None = None,
 ) -> dict[str, FormField]:
+    """Create v2 launcher form fields with an expanding value column.
+
+    Contract:
+    - editable fields are always rendered for provided `params`; prefilled values only
+      initialize widgets and must not hide rows;
+    - value column (index 1) expands horizontally;
+    - path/string/fixed-like entries use a conservative wide default width.
+    """
+
     initial_values = initial_values or {}
     fixed_values = fixed_values or {}
     fields: dict[str, FormField] = {}
+
+    parent.columnconfigure(1, weight=1)
 
     for row, (name, param) in enumerate(params.items()):
         label = param.title or name
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=5, pady=4)
 
         if name in fixed_values:
-            entry = ttk.Entry(parent)
+            entry = ttk.Entry(parent, width=LONG_ENTRY_WIDTH)
             entry.insert(0, _display_fixed_value(param, fixed_values[name]))
             entry.configure(state="disabled")
             entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
@@ -71,22 +85,21 @@ def create_v2_form_fields(
             continue
 
         value = initial_values.get(name, _default_value(param))
-        fields[name] = FormField(name, param, _create_widget(parent, param, value))
+        fields[name] = FormField(name, param, _create_widget(parent, param, value, row=row))
 
-    parent.columnconfigure(1, weight=1)
     return fields
 
 
-def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
+def _create_widget(parent: tk.Widget, param: ParamDef, value: Any, *, row: int) -> Any:
     ptype = param.type
     widget: Any
 
     if ptype == ParamType.SECRET and param.source in (SecretSource.ENV, SecretSource.VAULT):
-        widget = ttk.Entry(parent)
+        widget = ttk.Entry(parent, width=LONG_ENTRY_WIDTH)
         widget.insert(0, _secret_source_display(param))
         widget.configure(state="disabled")
     elif ptype in (ParamType.STRING, ParamType.INT, ParamType.FLOAT, ParamType.SECRET):
-        widget = ttk.Entry(parent, show="*" if ptype == ParamType.SECRET else "")
+        widget = ttk.Entry(parent, width=LONG_ENTRY_WIDTH, show="*" if ptype == ParamType.SECRET else "")
         if value not in (None, ""):
             widget.insert(0, str(value))
     elif ptype == ParamType.TEXT:
@@ -112,10 +125,11 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
                 widget.selection_set(idx)
     elif ptype in (ParamType.FILEPATH, ParamType.DIRPATH):
         frame = ttk.Frame(parent)
-        entry = ttk.Entry(frame)
+        frame.columnconfigure(0, weight=1)
+        entry = ttk.Entry(frame, width=LONG_ENTRY_WIDTH)
         if value not in (None, ""):
             entry.insert(0, str(value))
-        entry.pack(side="left", fill="x", expand=True)
+        entry.grid(row=0, column=0, sticky="ew")
 
         def browse() -> None:
             selected = filedialog.askdirectory() if ptype == ParamType.DIRPATH else filedialog.askopenfilename()
@@ -123,7 +137,7 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
                 entry.delete(0, "end")
                 entry.insert(0, selected)
 
-        ttk.Button(frame, text="Browse", command=browse).pack(side="left", padx=(6, 0))
+        ttk.Button(frame, text="Browse", command=browse).grid(row=0, column=1, padx=(6, 0), sticky="e")
         frame.entry = entry
         widget = frame
     elif ptype in (ParamType.KV_LIST, ParamType.STRUCT_LIST):
@@ -135,7 +149,7 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
         if value not in (None, ""):
             widget.insert(0, str(value))
 
-    widget.grid(sticky="ew", padx=5, pady=4)
+    widget.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
     return widget
 
 

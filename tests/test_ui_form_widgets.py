@@ -1,8 +1,14 @@
+import tkinter as tk
+
+import pytest
+
 from yaml_cli_ui.ui.form_widgets import (
     FormField,
     _display_fixed_value,
     apply_values_to_v2_form,
     collect_v2_form_values,
+    LONG_ENTRY_WIDTH,
+    create_v2_form_fields,
 )
 from yaml_cli_ui.v2.models import ParamDef, ParamType, SecretSource
 
@@ -154,3 +160,53 @@ def test_apply_values_updates_widgets():
     assert fields["notes"].widget.get("1.0", "end") == "tt"
     assert fields["flag"].widget.var.get() is True
     assert multi.selected == {0, 2}
+
+
+def test_path_entry_expands_with_grid_contract():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk unavailable in environment: {exc}")
+    root.withdraw()
+    try:
+        body = tk.Frame(root)
+        body.grid()
+        fields = create_v2_form_fields(
+            body,
+            {"out": ParamDef(type=ParamType.FILEPATH)},
+            initial_values={"out": "/tmp/a/very/long/path/value.npy"},
+        )
+
+        frame = fields["out"].widget
+        entry = frame.entry
+        frame_grid = frame.grid_info()
+        entry_grid = entry.grid_info()
+
+        assert int(body.grid_columnconfigure(1)["weight"]) == 1
+        assert frame_grid["sticky"] == "ew"
+        assert entry_grid["sticky"] == "ew"
+        assert int(entry.cget("width")) >= LONG_ENTRY_WIDTH
+    finally:
+        root.destroy()
+
+
+def test_fixed_entry_uses_wide_layout_contract():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk unavailable in environment: {exc}")
+    root.withdraw()
+    try:
+        body = tk.Frame(root)
+        body.grid()
+        fields = create_v2_form_fields(
+            body,
+            {"f": ParamDef(type=ParamType.FILEPATH)},
+            fixed_values={"f": "/tmp/very/long/fixed/output/file.npy"},
+        )
+        widget = fields["f"].widget
+        assert int(widget.cget("width")) >= LONG_ENTRY_WIDTH
+        assert widget.cget("state") == "disabled"
+        assert widget.grid_info()["sticky"] == "ew"
+    finally:
+        root.destroy()
