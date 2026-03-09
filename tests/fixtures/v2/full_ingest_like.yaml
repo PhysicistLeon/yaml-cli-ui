@@ -1,0 +1,45 @@
+version: 2
+imports:
+  media: ./packs/media.yaml
+  fs: ./packs/fs.yaml
+profiles:
+  default:
+    workdir: /tmp
+params:
+  collection:
+    type: string
+    default: inbox
+  jobs:
+    type: struct_list
+    default:
+      - {name: a}
+      - {name: b}
+locals:
+  spool_root: "${profile.workdir}/runs/${params.collection}"
+  media_script: $media.locals.scrape_script
+commands:
+  prep:
+    run:
+      program: python
+      argv: [-c, "print('prep')"]
+  process_one:
+    run:
+      program: python
+      argv:
+        - -c
+        - "import sys; print('job=' + sys.argv[1])"
+        - $job.name
+pipelines:
+  ingest:
+    steps:
+      - prep
+      - step: per_job
+        foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - process_one
+launchers:
+  ingest:
+    title: Ingest
+    use: ingest

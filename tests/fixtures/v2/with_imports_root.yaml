@@ -1,0 +1,15 @@
+version: 2
+imports:
+  media: ./packs/media.yaml
+  fs: ./packs/fs.yaml
+commands:
+  root_echo:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('root')"
+launchers:
+  main:
+    title: Main
+    use: root_echo

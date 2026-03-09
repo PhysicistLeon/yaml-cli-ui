@@ -1,0 +1,14 @@
+version: 2
+locals:
+  first: $locals.second
+  second: value
+commands:
+  noop:
+    run:
+      program: python
+      argv:
+        - -V
+launchers:
+  start:
+    title: Start
+    use: noop

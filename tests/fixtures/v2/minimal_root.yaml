@@ -1,0 +1,11 @@
+version: 2
+commands:
+  hello_command:
+    run:
+      program: python
+      argv:
+        - -V
+launchers:
+  hello:
+    title: Hello
+    use: hello_command

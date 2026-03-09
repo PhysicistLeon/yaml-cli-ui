@@ -1,0 +1,22 @@
+version: 2
+commands:
+  fail_cmd:
+    run:
+      program: python
+      argv: [-c, "import sys; sys.stderr.write('boom\\n'); sys.exit(4)"]
+  ok_cmd:
+    run:
+      program: python
+      argv: [-c, "print('after')"]
+pipelines:
+  continue_case:
+    steps:
+      - step: fail
+        use: fail_cmd
+        continue_on_error: true
+      - step: ok
+        use: ok_cmd
+launchers:
+  run_continue:
+    title: Continue
+    use: continue_case

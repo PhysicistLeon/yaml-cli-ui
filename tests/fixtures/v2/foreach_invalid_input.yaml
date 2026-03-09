@@ -1,0 +1,19 @@
+version: 2
+commands:
+  noop:
+    run:
+      program: python
+      argv: [-c, "print('noop')"]
+pipelines:
+  foreach_bad:
+    steps:
+      - step: each
+        foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - noop
+launchers:
+  run_foreach_bad:
+    title: Foreach bad
+    use: foreach_bad

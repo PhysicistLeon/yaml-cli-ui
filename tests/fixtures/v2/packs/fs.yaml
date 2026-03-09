@@ -1,0 +1,10 @@
+version: 2
+locals:
+  ensure_dir_script: scripts/ensure_dir.py
+commands:
+  fs_info:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('fs')"

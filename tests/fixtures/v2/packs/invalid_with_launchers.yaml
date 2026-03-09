@@ -1,0 +1,10 @@
+version: 2
+commands:
+  helper:
+    run:
+      program: python
+      argv: [-V]
+launchers:
+  illegal:
+    title: Illegal
+    use: helper
