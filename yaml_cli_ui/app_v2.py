@@ -15,11 +15,17 @@ LauncherDialog :=
   fixed/read-only with-bound params
   validation
   submit -> background execution
+
+Launcher UX :=
+  launcher.info is displayed via hover tooltip (no inline label)
+  launcher dialog includes only params used by selected launcher graph
+  launcher starts immediately when no editable input is needed
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -32,6 +38,7 @@ from .ui.form_widgets import apply_values_to_v2_form, collect_v2_form_values, cr
 from .ui.history import RunHistoryStore
 from .ui.log_views import map_step_status, render_step_result_text
 from .ui.status import status_to_color
+from .ui.tooltips import TooltipController, attach_tooltip
 from .v2.context import build_runtime_context, context_to_mapping
 from .v2.executor import execute_callable_name
 from .v2.errors import V2Error
@@ -41,6 +48,8 @@ from .v2.persistence import LauncherPersistenceService
 
 
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
+_PARAM_REF_PATTERN = re.compile(r"\$params\.([A-Za-z_][A-Za-z0-9_]*)|\$\{params\.([A-Za-z_][A-Za-z0-9_]*)[^}]*\}")
+_SHORT_REF_PATTERN = re.compile(r"^\$(?:\{)?([A-Za-z_][A-Za-z0-9_]*)\}?$")
 
 
 def resolve_profile_ui_state(doc: V2Document) -> tuple[bool, str | None, list[str]]:
@@ -54,12 +63,108 @@ def resolve_profile_ui_state(doc: V2Document) -> tuple[bool, str | None, list[st
     return True, names[0], names
 
 
-def launcher_param_plan(doc: V2Document, launcher_name: str) -> tuple[dict[str, ParamDef], dict[str, Any]]:
-    """Conservative plan: editable root params minus launcher.with; fixed = launcher.with."""
+def _collect_param_refs_from_value(value: Any, available_params: set[str]) -> set[str]:
+    used: set[str] = set()
+    if isinstance(value, str):
+        for direct, templated in _PARAM_REF_PATTERN.findall(value):
+            if direct:
+                used.add(direct)
+            if templated:
+                used.add(templated)
+        short = _SHORT_REF_PATTERN.match(value.strip())
+        if short and short.group(1) in available_params:
+            used.add(short.group(1))
+        return used
+    if isinstance(value, dict):
+        for nested in value.values():
+            used.update(_collect_param_refs_from_value(nested, available_params))
+    elif isinstance(value, list):
+        for nested in value:
+            used.update(_collect_param_refs_from_value(nested, available_params))
+    return used
+
+
+def _resolve_callable_for_analysis(
+    doc: V2Document,
+    callable_name: str,
+) -> tuple[V2Document, Any] | None:
+    if "." in callable_name:
+        alias, nested = callable_name.split(".", 1)
+        imported_doc = doc.imported_documents.get(alias)
+        if imported_doc is None:
+            return None
+        return _resolve_callable_for_analysis(imported_doc, nested)
+    callable_obj = doc.callables().get(callable_name)
+    if callable_obj is None:
+        return None
+    return doc, callable_obj
+
+
+def collect_used_params_for_launcher(doc: V2Document, launcher_name: str) -> set[str]:
+    """Collect root params referenced by launcher target graph."""
+
+    available_params = set(doc.params.keys())
+    used: set[str] = set()
+    visited: set[tuple[int, str]] = set()
+
+    def collect_callable(target_doc: V2Document, callable_name: str) -> None:
+        key = (id(target_doc), callable_name)
+        if key in visited:
+            return
+        visited.add(key)
+
+        resolved = _resolve_callable_for_analysis(target_doc, callable_name)
+        if resolved is None:
+            return
+        resolved_doc, callable_obj = resolved
+        used.update(_collect_param_refs_from_value(callable_obj.when, available_params))
+
+        if hasattr(callable_obj, "run"):
+            run = callable_obj.run
+            used.update(_collect_param_refs_from_value(run.program, available_params))
+            used.update(_collect_param_refs_from_value(run.argv, available_params))
+            used.update(_collect_param_refs_from_value(run.workdir, available_params))
+            used.update(_collect_param_refs_from_value(run.env, available_params))
+        else:
+            for step in callable_obj.steps:
+                collect_step(resolved_doc, step)
+
+        if callable_obj.on_error is not None:
+            for fallback in callable_obj.on_error.steps:
+                collect_step(resolved_doc, fallback)
+
+    def collect_step(target_doc: V2Document, step: Any) -> None:
+        if isinstance(step, str):
+            collect_callable(target_doc, step)
+            return
+        used.update(_collect_param_refs_from_value(step.when, available_params))
+        if step.foreach is not None:
+            used.update(_collect_param_refs_from_value(step.foreach.in_expr, available_params))
+            for nested_step in step.foreach.steps:
+                collect_step(target_doc, nested_step)
+            return
+        used.update(_collect_param_refs_from_value(step.with_values, available_params))
+        if step.use:
+            collect_callable(target_doc, step.use)
 
     launcher = doc.launchers[launcher_name]
-    fixed = dict(launcher.with_values)
-    editable = {name: param for name, param in doc.params.items() if name not in fixed}
+    used.update(_collect_param_refs_from_value(doc.locals, available_params))
+    used.update(_collect_param_refs_from_value(launcher.with_values, available_params))
+    collect_callable(doc, launcher.use)
+    return used
+
+
+def launcher_param_plan(doc: V2Document, launcher_name: str) -> tuple[dict[str, ParamDef], dict[str, Any]]:
+    """Return launcher dialog plan with only used params and fixed launcher.with values."""
+
+    launcher = doc.launchers[launcher_name]
+    used_params = collect_used_params_for_launcher(doc, launcher_name)
+    fixed = {name: value for name, value in launcher.with_values.items() if name in used_params}
+    editable = {
+        name: param
+        for name, param in doc.params.items()
+        if name in used_params and name not in fixed
+    }
     return editable, fixed
 
 
@@ -120,6 +225,7 @@ class AppV2(tk.Tk):
         self.profile_var = tk.StringVar(value="")
         self.profile_combo: ttk.Combobox | None = None
         self.persistence: LauncherPersistenceService | None = None
+        self.tooltip = TooltipController(self)
 
         header = ttk.Frame(self)
         header.pack(fill="x", padx=10, pady=10)
@@ -169,6 +275,7 @@ class AppV2(tk.Tk):
         self._render_launchers()
 
     def _clear_launcher_views(self) -> None:
+        self.tooltip.hide()
         for tab_id in self.output_notebook.tabs()[1:]:
             self.output_notebook.forget(tab_id)
         self.launcher_buttons.clear()
@@ -226,7 +333,7 @@ class AppV2(tk.Tk):
             row.pack(fill="x", pady=3)
             btn = tk.Button(row, text=launcher.title, command=lambda n=name: self.start_launcher(n))
             btn.pack(side="left")
-            ttk.Label(row, text=launcher.info or "").pack(side="left", padx=8)
+            attach_tooltip(self.tooltip, btn, launcher.info)
             status = tk.Label(row, text=" idle ", bg=status_to_color("idle"))
             status.pack(side="right")
             self.launcher_buttons[name] = btn
