@@ -123,6 +123,9 @@ def build_process_env(
     return merged
 
 
+# NOTE: Intentionally mirrored from legacy v1 for frozen-parent/python-child
+# compatibility behavior.
+# pylint: disable=duplicate-code
 def _looks_like_python_program(program: str) -> bool:
     normalized = str(program).replace("\\", "/")
     name = normalized.rsplit("/", 1)[-1].lower()
