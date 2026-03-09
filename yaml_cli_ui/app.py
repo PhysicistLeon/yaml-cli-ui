@@ -26,13 +26,16 @@ from .engine import (
     validate_config,
 )
 from .presets import PresetError, PresetService
+from .ui.status import (
+    FAILED_COLOR,
+    IDLE_COLOR,
+    RECOVERED_COLOR,
+    RUNNING_COLOR,
+    SUCCESS_COLOR,
+    status_color,
+)
 
 
-IDLE_COLOR = "#d9d9d9"
-RUNNING_COLOR = "#f1c40f"
-SUCCESS_COLOR = "#2ecc71"
-FAILED_COLOR = "#e74c3c"
-RECOVERED_COLOR = "#f39c12"
 DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 STATE_FILE_PATH = Path.home() / ".yaml_cli_ui" / "state.json"
 TOOLTIP_DELAY_MS = 500
@@ -458,13 +461,7 @@ class App(tk.Tk):
             self._create_action_tab(action_id)
 
     def _set_action_status(self, action_id: str, status: str) -> None:
-        color = {
-            "idle": IDLE_COLOR,
-            "running": RUNNING_COLOR,
-            "success": SUCCESS_COLOR,
-            "recovered": RECOVERED_COLOR,
-            "failed": FAILED_COLOR,
-        }.get(status, IDLE_COLOR)
+        color = status_color(status)
         btn = self.action_buttons.get(action_id)
         if btn is not None:
             btn.configure(bg=color, activebackground=color)
