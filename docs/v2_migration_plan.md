@@ -88,3 +88,47 @@ Intentional non-goals in this step:
 - no launcher persistence/presets/state migration
 - no parallel execution
 - no core semantics changes beyond thin AppV2 wiring.
+
+## Step 12: v2 launcher persistence layer
+
+Added `yaml_cli_ui/v2/persistence.py` and wired it into `AppV2`.
+
+### v2 storage files
+
+For `<config>.yaml` v2 now uses two separate files (no legacy v1 contract changes):
+- presets: `<config>.yaml.launchers.presets.json`
+- ui state: `<config>.yaml.state.json`
+
+### Separation of concerns
+
+- Presets file stores only named launcher presets.
+- State file stores UI/session state (`selected_profile`, `last_values`, `last_selected_preset`).
+- No auto-migration from legacy v1 `.presets.json`/`last_run` is performed.
+
+### Secret sanitization policy
+
+Centralized in `sanitize_param_values_for_storage(...)`:
+- all params declared as `type: secret` are removed before saving presets/state;
+- values fixed by `launcher.with` are not persisted in `last_values`.
+
+### Value precedence in launcher dialog
+
+Applied order:
+1. param defaults
+2. `state.launchers.<name>.last_values`
+3. selected preset values
+4. `launcher.with` fixed read-only values (highest priority)
+
+Unknown/removed fields in stored presets are ignored safely.
+
+### Error handling and writes
+
+- Malformed JSON / wrong version / bad structure raise `V2PersistenceError` at loader level.
+- `LauncherPersistenceService` uses conservative fallback (empty presets/state) and collects warnings for UI.
+- Writes are atomic (temp file + `os.replace`).
+
+### Intentionally not implemented in this step
+
+- auto-migration from v1 storage
+- cloud/sync storage
+- dedicated vault file format design

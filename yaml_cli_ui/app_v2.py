@@ -23,9 +23,9 @@ import threading
 from pathlib import Path
 from typing import Any
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
-from .ui.form_widgets import collect_v2_form_values, create_v2_form_fields
+from .ui.form_widgets import apply_values_to_v2_form, collect_v2_form_values, create_v2_form_fields
 from .ui.history import RunHistoryStore
 from .ui.log_views import map_step_status, render_step_result_text
 from .ui.status import status_to_color
@@ -34,6 +34,7 @@ from .v2.executor import execute_callable_name
 from .v2.errors import V2Error
 from .v2.loader import load_v2_document
 from .v2.models import ParamDef, ParamType, SecretSource, StepResult, V2Document
+from .v2.persistence import LauncherPersistenceService, V2PersistenceError
 
 
 def resolve_profile_ui_state(doc: V2Document) -> tuple[bool, str | None, list[str]]:
@@ -112,6 +113,7 @@ class AppV2(tk.Tk):
         self.history_combos: dict[str, ttk.Combobox] = {}
         self.profile_var = tk.StringVar(value="")
         self.profile_combo: ttk.Combobox | None = None
+        self.persistence: LauncherPersistenceService | None = None
 
         header = ttk.Frame(self)
         header.pack(fill="x", padx=10, pady=10)
@@ -139,6 +141,9 @@ class AppV2(tk.Tk):
     def reload(self) -> None:
         path = Path(self.path_var.get()).expanduser()
         self.doc = load_v2_document(path)
+        self.persistence = LauncherPersistenceService(path, self.doc)
+        if self.persistence.warnings:
+            messagebox.showwarning("v2 persistence", "\n".join(self.persistence.warnings), parent=self)
         self._clear_launcher_views()
         self._render_profile_selector()
         self._render_launchers()
@@ -161,6 +166,9 @@ class AppV2(tk.Tk):
             child.destroy()
         assert self.doc is not None
         show_selector, selected, names = resolve_profile_ui_state(self.doc)
+        preferred = self.persistence.get_selected_profile() if self.persistence else None
+        if preferred in names:
+            selected = preferred
         self.profile_combo = None
         self.profile_var.set(selected or "")
 
@@ -177,7 +185,8 @@ class AppV2(tk.Tk):
             textvariable=self.profile_var,
             state="readonly",
         )
-        combo.current(0)
+        combo.current(names.index(self.profile_var.get()))
+        combo.bind("<<ComboboxSelected>>", self._on_profile_selected)
         combo.pack(side="left", padx=8)
         self.profile_combo = combo
 
@@ -213,6 +222,8 @@ class AppV2(tk.Tk):
         assert self.doc is not None
         editable, fixed = launcher_param_plan(self.doc, launcher_name)
 
+        last_values = self.persistence.get_last_values(launcher_name) if self.persistence else {}
+        initial_values = {k: v for k, v in last_values.items() if k in editable}
         needs_dialog = any(not _param_has_ready_value(param) for param in editable.values())
         if not needs_dialog:
             self._execute_in_background(launcher_name, {})
@@ -223,19 +234,111 @@ class AppV2(tk.Tk):
         dialog.title(launcher.title)
         body = ttk.Frame(dialog)
         body.pack(fill="both", expand=True, padx=10, pady=10)
-        fields = create_v2_form_fields(body, editable, fixed_values=fixed)
+
+        preset_var = tk.StringVar(value="")
+        preset_combo: ttk.Combobox | None = None
+
+        preset_names = self.persistence.list_presets(launcher_name) if self.persistence else []
+        if preset_names:
+            preset_frame = ttk.Frame(body)
+            preset_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+            ttk.Label(preset_frame, text="Preset").pack(side="left")
+            preset_combo = ttk.Combobox(preset_frame, values=preset_names, textvariable=preset_var, state="readonly")
+            preset_combo.pack(side="left", fill="x", expand=True, padx=6)
+
+        fields = create_v2_form_fields(body, editable, initial_values=initial_values, fixed_values=fixed)
+
+        def apply_selected_preset() -> None:
+            if not self.persistence:
+                return
+            name = preset_var.get().strip()
+            if not name:
+                return
+            preset = self.persistence.get_preset(launcher_name, name) or {}
+            filtered = {k: v for k, v in preset.items() if k in editable}
+            apply_values_to_v2_form(fields, filtered)
+
+        if preset_combo is not None:
+            preset_combo.bind("<<ComboboxSelected>>", lambda _e: apply_selected_preset())
+            last_selected = self.persistence.get_last_selected_preset(launcher_name) if self.persistence else None
+            if last_selected and last_selected in preset_names:
+                preset_var.set(last_selected)
+                apply_selected_preset()
+
+        def persist_current_as_preset(overwrite: bool = False) -> None:
+            if not self.persistence:
+                return
+            values, errors = collect_v2_form_values(fields)
+            if errors:
+                messagebox.showerror("Validation error", "\n".join(errors), parent=dialog)
+                return
+            existing = self.persistence.list_presets(launcher_name)
+            chosen = preset_var.get().strip() if overwrite else ""
+            if not chosen:
+                chosen = simpledialog.askstring("Preset name", "Name for preset", parent=dialog) or ""
+            chosen = chosen.strip()
+            if not chosen:
+                return
+            if not overwrite and chosen in existing:
+                messagebox.showerror("Preset exists", "Preset with this name already exists", parent=dialog)
+                return
+            self.persistence.upsert_preset(launcher_name, chosen, values)
+            preset_var.set(chosen)
+            if preset_combo is not None:
+                preset_combo["values"] = self.persistence.list_presets(launcher_name)
+
+        def rename_selected_preset() -> None:
+            if not self.persistence:
+                return
+            current = preset_var.get().strip()
+            if not current:
+                return
+            new_name = simpledialog.askstring("Rename preset", "New preset name", parent=dialog) or ""
+            new_name = new_name.strip()
+            if not new_name:
+                return
+            self.persistence.rename_preset(launcher_name, current, new_name)
+            preset_var.set(new_name)
+            if preset_combo is not None:
+                preset_combo["values"] = self.persistence.list_presets(launcher_name)
+
+        def delete_selected_preset() -> None:
+            if not self.persistence:
+                return
+            current = preset_var.get().strip()
+            if not current:
+                return
+            self.persistence.delete_preset(launcher_name, current)
+            preset_var.set("")
+            if preset_combo is not None:
+                preset_combo["values"] = self.persistence.list_presets(launcher_name)
 
         def on_run() -> None:
             values, errors = collect_v2_form_values(fields)
             if errors:
                 messagebox.showerror("Validation error", "\n".join(errors), parent=dialog)
                 return
+            if self.persistence:
+                self.persistence.set_last_values(launcher_name, values)
+                selected_preset = preset_var.get().strip() or None
+                self.persistence.set_last_selected_preset(launcher_name, selected_preset)
             dialog.destroy()
             self._execute_in_background(launcher_name, values)
 
         footer = ttk.Frame(dialog)
         footer.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Button(footer, text="Run", command=on_run).pack(side="right")
+        ttk.Button(footer, text="Save preset", command=lambda: persist_current_as_preset(False)).pack(side="left")
+        ttk.Button(footer, text="Overwrite", command=lambda: persist_current_as_preset(True)).pack(side="left", padx=(6, 0))
+        ttk.Button(footer, text="Rename", command=rename_selected_preset).pack(side="left", padx=(6, 0))
+        ttk.Button(footer, text="Delete", command=delete_selected_preset).pack(side="left", padx=(6, 0))
+
+    def _on_profile_selected(self, _event: object | None = None) -> None:
+        if self.persistence:
+            try:
+                self.persistence.set_selected_profile(self.profile_var.get() or None)
+            except V2PersistenceError as exc:
+                messagebox.showwarning("v2 persistence", str(exc), parent=self)
 
     def _execute_in_background(self, launcher_name: str, values: dict[str, Any]) -> None:
         rec = self.history.create(launcher_name)

@@ -26,6 +26,17 @@ from .executor import (
 )
 from .expr import evaluate_expression, resolve_name
 from .loader import load_v2_document, load_yaml_file, resolve_imports
+from .persistence import (
+    LauncherPersistenceService,
+    V2PersistenceError,
+    get_v2_presets_path,
+    get_v2_state_path,
+    load_v2_presets,
+    load_v2_state,
+    sanitize_param_values_for_storage,
+    save_v2_presets,
+    save_v2_state,
+)
 from .models import (
     PUBLIC_API_MODELS,
     CommandDef,
@@ -101,4 +112,13 @@ __all__ = [
     "build_imported_locals_context",
     "evaluate_imported_document_locals",
     "context_to_mapping",
+    "V2PersistenceError",
+    "LauncherPersistenceService",
+    "get_v2_presets_path",
+    "get_v2_state_path",
+    "load_v2_presets",
+    "save_v2_presets",
+    "load_v2_state",
+    "save_v2_state",
+    "sanitize_param_values_for_storage",
 ]

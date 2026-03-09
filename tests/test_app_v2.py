@@ -13,6 +13,7 @@ from yaml_cli_ui.app_v2 import (
     run_launcher,
 )
 from yaml_cli_ui.v2.loader import load_v2_document
+from yaml_cli_ui.v2.persistence import LauncherPersistenceService
 from yaml_cli_ui.v2.models import (
     LauncherDef,
     ParamDef,
@@ -188,5 +189,27 @@ def test_reload_does_not_duplicate_launcher_tabs(v2_yaml):
         app.reload()
         tab_count = len(app.output_notebook.tabs())
         assert tab_count == 2  # All runs + run_hello
+    finally:
+        app.destroy()
+
+
+def test_app_v2_profile_restored_from_state(v2_yaml):
+    doc = load_v2_document(v2_yaml)
+    svc = LauncherPersistenceService(v2_yaml, doc)
+    svc.set_selected_profile("safe")
+
+    app = _maybe_app(v2_yaml)
+    try:
+        assert app.profile_var.get() == "safe"
+    finally:
+        app.destroy()
+
+
+def test_app_v2_saves_last_values_before_run(v2_yaml):
+    app = _maybe_app(v2_yaml)
+    try:
+        app._execute_in_background = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+        app.persistence.set_last_values("run_hello", {"name": "Old", "token": "hidden"})
+        assert app.persistence.get_last_values("run_hello") == {"name": "Old"}
     finally:
         app.destroy()
