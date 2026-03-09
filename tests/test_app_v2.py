@@ -13,6 +13,7 @@ from yaml_cli_ui.app_v2 import (
     run_launcher,
 )
 from yaml_cli_ui.v2.loader import load_v2_document
+from yaml_cli_ui.v2.persistence import save_v2_presets, save_v2_state
 from yaml_cli_ui.v2.models import (
     LauncherDef,
     ParamDef,
@@ -188,5 +189,148 @@ def test_reload_does_not_duplicate_launcher_tabs(v2_yaml):
         app.reload()
         tab_count = len(app.output_notebook.tabs())
         assert tab_count == 2  # All runs + run_hello
+    finally:
+        app.destroy()
+
+
+def test_reload_falls_back_when_saved_profile_missing(tmp_path):
+    path = tmp_path / "missing_profile.yaml"
+    path.write_text(
+        f"""
+version: 2
+profiles:
+  fast: {{}}
+  safe: {{}}
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    save_v2_state(path, {"version": 2, "selected_profile": "gone", "launchers": {}})
+
+    app = _maybe_app(path)
+    try:
+        assert app.profile_var.get() == "fast"
+        assert app.profile_combo is not None
+    finally:
+        app.destroy()
+
+
+def test_launcher_dialog_prefill_precedence_defaults_state_preset_with(tmp_path, monkeypatch):
+    path = tmp_path / "precedence.yaml"
+    path.write_text(
+        f"""
+version: 2
+profiles:
+  p1: {{}}
+params:
+  a:
+    type: string
+    default: dflt_a
+  b:
+    type: string
+    default: dflt_b
+  c:
+    type: string
+    default: dflt_c
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')"]
+launchers:
+  l:
+    title: L
+    use: hello
+    with:
+      c: fixed_c
+""",
+        encoding="utf-8",
+    )
+    save_v2_state(
+        path,
+        {
+            "version": 2,
+            "selected_profile": "p1",
+            "launchers": {"l": {"last_values": {"a": "state_a", "c": "state_c"}}},
+        },
+    )
+    save_v2_presets(
+        path,
+        {
+            "version": 2,
+            "launchers": {
+                "l": {
+                    "presets": {
+                        "p": {"params": {"a": "preset_a", "b": "preset_b", "c": "preset_c"}}
+                    }
+                }
+            },
+        },
+    )
+
+    captured = {}
+
+    def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        captured["initial_values"] = dict(initial_values or {})
+        captured["fixed_values"] = dict(fixed_values or {})
+        return {}
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.create_v2_form_fields", fake_create)
+
+    app = _maybe_app(path)
+    try:
+        app.persistence.set_last_selected_preset("l", "p")
+        app.start_launcher("l")
+    finally:
+        app.destroy()
+
+    assert captured["initial_values"]["a"] == "preset_a"
+    assert captured["initial_values"]["b"] == "preset_b"
+    assert captured["initial_values"].get("c") is None
+    assert captured["fixed_values"]["c"] == "fixed_c"
+
+
+def test_reload_shows_aggregated_persistence_warning(tmp_path, monkeypatch):
+    path = tmp_path / "warn.yaml"
+    path.write_text(
+        f"""
+version: 2
+profiles:
+  p1: {{}}
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    # both files malformed to produce two warnings
+    (tmp_path / "warn.yaml.launchers.presets.json").write_text("{oops", encoding="utf-8")
+    (tmp_path / "warn.yaml.state.json").write_text("{oops", encoding="utf-8")
+
+    calls = []
+
+    def fake_showwarning(title, message, _parent=None):
+        calls.append((title, message))
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.messagebox.showwarning", fake_showwarning)
+
+    app = _maybe_app(path)
+    try:
+        assert len(calls) == 1
+        assert "Using safe defaults" in calls[0][1]
     finally:
         app.destroy()
