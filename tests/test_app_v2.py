@@ -10,7 +10,9 @@ import pytest
 from yaml_cli_ui.app_v2 import (
     AppV2,
     collect_used_params_for_launcher,
+    has_effective_initial_value,
     launcher_param_plan,
+    order_editable_params_for_dialog,
     resolve_profile_ui_state,
     materialize_launcher_params,
     run_launcher,
@@ -114,6 +116,33 @@ def test_launcher_param_plan_with_fixed_bindings():
 
     assert set(editable.keys()) == {"x"}
     assert fixed == {"y": "fixed"}
+
+
+def test_order_editable_params_for_dialog_empty_first_stable_order():
+    editable = {
+        "empty_first": ParamDef(type=ParamType.STRING),
+        "defaulted": ParamDef(type=ParamType.STRING, default="dflt"),
+        "state_prefilled": ParamDef(type=ParamType.STRING),
+        "empty_second": ParamDef(type=ParamType.STRING),
+    }
+    ordered = order_editable_params_for_dialog(editable, {"state_prefilled": "from_state"})
+    assert list(ordered.keys()) == ["empty_first", "empty_second", "defaulted", "state_prefilled"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, False),
+        ("", False),
+        ([], False),
+        ({}, False),
+        (0, True),
+        ("x", True),
+        (["x"], True),
+    ],
+)
+def test_has_effective_initial_value(value, expected):
+    assert has_effective_initial_value(value) is expected
 
 
 def test_launcher_param_plan_with_no_used_params():
@@ -328,25 +357,20 @@ def test_background_completion_updates_history_and_logs(v2_yaml):
         app.destroy()
 
 
-def test_start_launcher_opens_dialog_when_params_are_defaulted(tmp_path, monkeypatch):
-    path = tmp_path / "auto.yaml"
+def test_defaulted_param_is_rendered_in_launcher_dialog(tmp_path, monkeypatch):
+    path = tmp_path / "defaulted_rendered.yaml"
     path.write_text(
         f"""
 version: 2
 params:
-  env_secret:
-    type: secret
-    required: true
-    source: env
-    env: MY_ENV_SECRET
-  d:
-    type: string
-    default: hello
+  dataset_dir:
+    type: dirpath
+    default: /tmp/camera_frames
 commands:
   hello:
     run:
       program: "{sys.executable}"
-      argv: ["-c", "print('ok')"]
+      argv: ["-c", "print('ok')", "$params.dataset_dir"]
 launchers:
   l:
     title: L
@@ -354,7 +378,17 @@ launchers:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setenv("MY_ENV_SECRET", "s3cr3t")
+
+    captured = {}
+
+    def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        captured["params"] = dict(_params)
+        captured["initial_values"] = dict(initial_values or {})
+        captured["fixed_values"] = dict(fixed_values or {})
+        return {}
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.create_v2_form_fields", fake_create)
+
     app = _maybe_app(path)
     try:
         calls: list[dict[str, str]] = []
@@ -373,8 +407,13 @@ launchers:
 
         monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", capture_toplevel)
         app.start_launcher("l")
+
         assert not calls
         assert created["count"] == 1
+        assert "dataset_dir" in captured["params"]
+        assert captured["params"]["dataset_dir"].default == "/tmp/camera_frames"
+        assert captured["initial_values"].get("dataset_dir") is None
+        assert captured["fixed_values"] == {}
     finally:
         app.destroy()
 
@@ -436,7 +475,7 @@ launchers:
         app.destroy()
 
 
-def test_start_launcher_opens_dialog_when_only_fixed_used_params(tmp_path, monkeypatch):
+def test_start_launcher_fixed_only_used_param_still_opens_dialog(tmp_path, monkeypatch):
     path = tmp_path / "fixed_only.yaml"
     path.write_text(
         f"""
@@ -462,6 +501,7 @@ launchers:
     captured = {}
 
     def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        captured["params"] = dict(_params)
         captured["initial_values"] = dict(initial_values or {})
         captured["fixed_values"] = dict(fixed_values or {})
         return {}
@@ -489,6 +529,7 @@ launchers:
 
         assert not calls
         assert created["count"] == 1
+        assert captured["params"] == {}
         assert captured["fixed_values"] == {"collection": "fixed"}
         assert captured["initial_values"] == {}
     finally:
@@ -616,7 +657,7 @@ launchers:
         app.destroy()
 
 
-def test_start_launcher_form_receives_prefilled_and_fixed_values(tmp_path, monkeypatch):
+def test_start_launcher_mixed_fixed_and_editable_prefilled_fields(tmp_path, monkeypatch):
     path = tmp_path / "prefilled_and_fixed.yaml"
     path.write_text(
         f"""
@@ -656,6 +697,7 @@ launchers:
     captured = {}
 
     def fake_create(_parent, _params, *, initial_values=None, fixed_values=None):
+        captured["params"] = dict(_params)
         captured["initial_values"] = dict(initial_values or {})
         captured["fixed_values"] = dict(fixed_values or {})
         return {}
@@ -683,6 +725,7 @@ launchers:
 
         assert not calls
         assert created["count"] == 1
+        assert "username" in captured["params"]
         assert captured["initial_values"]["username"] == "preset_user"
         assert captured["fixed_values"] == {"collection": "fixed_collection"}
     finally:

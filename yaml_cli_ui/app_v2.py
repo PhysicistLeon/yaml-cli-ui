@@ -172,6 +172,32 @@ def launcher_param_plan(doc: V2Document, launcher_name: str) -> tuple[dict[str, 
     return editable, fixed
 
 
+def has_effective_initial_value(value: Any) -> bool:
+    """Return whether dialog field has a meaningful prefilled value."""
+
+    return value not in (None, "", [], {})
+
+
+def order_editable_params_for_dialog(
+    editable: dict[str, ParamDef],
+    initial_values: dict[str, Any] | None = None,
+) -> dict[str, ParamDef]:
+    """Stable-partition launcher fields: empty editable first, prefilled second.
+
+    Defaults/state/presets only prefill values and never hide fields. Ordering keeps
+    original YAML declaration order inside each group.
+    """
+
+    initial_values = initial_values or {}
+    empty: list[tuple[str, ParamDef]] = []
+    prefilled: list[tuple[str, ParamDef]] = []
+    for name, param in editable.items():
+        effective_value = initial_values.get(name, param.default)
+        target = prefilled if has_effective_initial_value(effective_value) else empty
+        target.append((name, param))
+    return dict([*empty, *prefilled])
+
+
 def should_open_launcher_dialog(editable: dict[str, ParamDef], fixed: dict[str, Any]) -> bool:
     """Return True when launcher dialog should be shown before execution.
 
@@ -422,10 +448,11 @@ class AppV2(tk.Tk):
                 selected_preset_var.set(last_preset)
                 preset_values = self.persistence.apply_preset_values(launcher_name, last_preset)
                 initial_values.update(preset_values)
-        fields = create_v2_form_fields(body, editable, initial_values=initial_values, fixed_values=fixed)
+        ordered_editable = order_editable_params_for_dialog(editable, initial_values)
+        fields = create_v2_form_fields(body, ordered_editable, initial_values=initial_values, fixed_values=fixed)
 
         presets_row = ttk.Frame(body)
-        presets_row.grid(row=len(editable), column=0, columnspan=2, sticky="ew", padx=5, pady=(8, 2))
+        presets_row.grid(row=len(ordered_editable), column=0, columnspan=2, sticky="ew", padx=5, pady=(8, 2))
         ttk.Label(presets_row, text="Preset").pack(side="left")
         preset_combo = ttk.Combobox(presets_row, textvariable=selected_preset_var, state="readonly")
         preset_combo.pack(side="left", fill="x", expand=True, padx=6)
