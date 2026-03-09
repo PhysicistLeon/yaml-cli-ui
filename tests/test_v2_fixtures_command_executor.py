@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from tests.v2_test_utils import load_fixture_document
 from yaml_cli_ui.v2.executor import execute_command_def
 from yaml_cli_ui.v2.models import CommandDef, RunSpec, StepStatus
@@ -11,7 +9,7 @@ def _ctx(**kwargs):
     return ctx
 
 
-def test_command_success_nonzero_stderr_and_timeout(tmp_path: Path):
+def test_command_success_nonzero_stderr_and_timeout():
     ok = execute_command_def(CommandDef(run=RunSpec(program="python", argv=["-c", "print('ok')"])), context=_ctx())
     assert ok.status == StepStatus.SUCCESS
     assert (ok.stdout or "").strip() == "ok"
@@ -29,7 +27,7 @@ def test_command_success_nonzero_stderr_and_timeout(tmp_path: Path):
     assert timeout.error and timeout.error.type == "timeout"
 
 
-def test_runtime_override_workdir_env_and_stream_modes(tmp_path: Path, monkeypatch):
+def test_runtime_override_workdir_env_and_stream_modes(tmp_path, monkeypatch):
     monkeypatch.setenv("BASE_FROM_ENV", "base")
 
     stdout_file = tmp_path / "out.txt"
@@ -62,7 +60,7 @@ def test_runtime_override_workdir_env_and_stream_modes(tmp_path: Path, monkeypat
     assert inherit.status == StepStatus.SUCCESS
 
 
-def test_fixture_replacements_cover_import_subtree(tmp_path: Path):
+def test_fixture_replacements_cover_import_subtree():
     doc = load_fixture_document(
         "with_imports_root.yaml",
         replacements={"python": "__PYTHON__", "scripts/ensure_dir.py": "__TMPDIR__/ensure.py"},

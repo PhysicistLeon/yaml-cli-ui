@@ -1,3 +1,5 @@
+# pylint: disable=import-error
+
 import pytest
 
 from tests.v2_test_utils import fixture_path
