@@ -20,6 +20,10 @@ Launcher UX :=
   launcher.info is displayed via hover tooltip (no inline label)
   launcher dialog includes only params used by selected launcher graph
   launcher starts immediately when no editable input is needed
+
+Param materialization precedence for launcher execution:
+  root defaults -> persisted last_values -> selected preset -> user-entered -> launcher.with
+`launcher.with` remains the final fixed override.
 """
 
 from __future__ import annotations
@@ -186,6 +190,8 @@ def run_launcher(
     params: dict[str, Any],
     *,
     selected_profile_name: str | None = None,
+    state_values: dict[str, Any] | None = None,
+    preset_values: dict[str, Any] | None = None,
 ) -> StepResult:
     """Run launcher callable with merged params and short-name bindings from launcher.with.
 
@@ -194,8 +200,13 @@ def run_launcher(
     """
 
     launcher = doc.launchers[launcher_name]
-    merged_params = dict(params)
-    merged_params.update(launcher.with_values)
+    merged_params = materialize_launcher_params(
+        doc,
+        launcher_name,
+        state_values=state_values,
+        preset_values=preset_values,
+        user_values=params,
+    )
     run_context = build_runtime_context(
         doc,
         params=merged_params,
@@ -208,6 +219,41 @@ def run_launcher(
         context=context_to_mapping(run_context),
         step_name=launcher_name,
     )
+
+
+def _default_materialized_params(doc: V2Document) -> dict[str, Any]:
+    """Build root param defaults available without explicit user input."""
+
+    result: dict[str, Any] = {}
+    for name, param in doc.params.items():
+        if param.default is not None:
+            result[name] = param.default
+    return result
+
+
+def materialize_launcher_params(
+    doc: V2Document,
+    launcher_name: str,
+    *,
+    state_values: dict[str, Any] | None = None,
+    preset_values: dict[str, Any] | None = None,
+    user_values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Materialize final launcher params with deterministic precedence."""
+
+    known = set(doc.params.keys())
+
+    def _known_only(values: dict[str, Any] | None) -> dict[str, Any]:
+        if not values:
+            return {}
+        return {name: value for name, value in values.items() if name in known}
+
+    merged = _default_materialized_params(doc)
+    merged.update(_known_only(state_values))
+    merged.update(_known_only(preset_values))
+    merged.update(_known_only(user_values))
+    merged.update(doc.launchers[launcher_name].with_values)
+    return merged
 
 
 class AppV2(tk.Tk):
@@ -477,11 +523,20 @@ class AppV2(tk.Tk):
         def worker() -> None:
             assert self.doc is not None
             try:
+                state_values: dict[str, Any] | None = None
+                preset_values: dict[str, Any] | None = None
+                if self.persistence:
+                    state_values = self.persistence.get_last_values(launcher_name)
+                    selected = self.persistence.get_last_selected_preset(launcher_name)
+                    if selected:
+                        preset_values = self.persistence.apply_preset_values(launcher_name, selected)
                 result = run_launcher(
                     self.doc,
                     launcher_name,
                     values,
                     selected_profile_name=(self.profile_var.get() or None),
+                    state_values=state_values,
+                    preset_values=preset_values,
                 )
                 status = map_step_status(result)
                 text = render_step_result_text(
