@@ -13,11 +13,11 @@ from .context import (
 )
 from .executor import (
     EXECUTOR_PUBLIC_API as _EXECUTOR_PUBLIC_API,
-    build_process_env as build_process_env,
-    execute_command_def as execute_command_def,
-    execute_run_spec as execute_run_spec,
-    resolve_program as resolve_program,
-    resolve_workdir as resolve_workdir,
+    build_process_env as _build_process_env,
+    execute_command_def as _execute_command_def,
+    execute_run_spec as _execute_run_spec,
+    resolve_program as _resolve_program,
+    resolve_workdir as _resolve_workdir,
 )
 from .expr import evaluate_expression, resolve_name
 from .loader import load_v2_document, load_yaml_file, resolve_imports
@@ -41,6 +41,12 @@ from .models import (
 )
 from .renderer import render_scalar_or_ref, render_string, render_value
 from .validator import validate_v2_document
+
+resolve_program = _resolve_program
+resolve_workdir = _resolve_workdir
+build_process_env = _build_process_env
+execute_command_def = _execute_command_def
+execute_run_spec = _execute_run_spec
 
 # Keep direct references so linters treat model re-exports as used symbols.
 _EXPORTED_MODEL_SYMBOLS = (
