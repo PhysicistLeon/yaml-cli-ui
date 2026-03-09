@@ -1,6 +1,6 @@
 """Public API surface for YAML CLI UI v2 scaffold."""
 
-from .expr import evaluate_expression, resolve_name
+from .argv import is_conditional_item, is_option_map, serialize_argv, serialize_argv_item
 from .context import (
     build_base_context,
     build_imported_locals_context,
@@ -11,14 +11,15 @@ from .context import (
     merge_with_bindings,
     resolve_selected_profile,
 )
-from .loader import load_v2_document, load_yaml_file, resolve_imports
-from .renderer import render_scalar_or_ref, render_string, render_value
-from .argv import (
-    is_conditional_item,
-    is_option_map,
-    serialize_argv,
-    serialize_argv_item,
+from .executor import (
+    build_process_env,
+    execute_command_def,
+    execute_run_spec,
+    resolve_program,
+    resolve_workdir,
 )
+from .expr import evaluate_expression, resolve_name
+from .loader import load_v2_document, load_yaml_file, resolve_imports
 from .models import (
     PUBLIC_API_MODELS,
     CommandDef,
@@ -37,6 +38,7 @@ from .models import (
     StepStatus,
     V2Document,
 )
+from .renderer import render_scalar_or_ref, render_string, render_value
 from .validator import validate_v2_document
 
 # Keep direct references so linters treat model re-exports as used symbols.
@@ -73,6 +75,11 @@ __all__ = [
     "serialize_argv_item",
     "is_option_map",
     "is_conditional_item",
+    "resolve_program",
+    "resolve_workdir",
+    "build_process_env",
+    "execute_command_def",
+    "execute_run_spec",
     "resolve_selected_profile",
     "build_base_context",
     "evaluate_root_locals",
