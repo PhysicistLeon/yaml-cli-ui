@@ -1,3 +1,5 @@
+# pylint: disable=import-error,protected-access,redefined-outer-name
+
 import sys
 import time
 import tkinter as tk
@@ -20,8 +22,8 @@ from yaml_cli_ui.v2.models import (
 )
 
 
-@pytest.fixture()
-def v2_yaml(tmp_path):
+@pytest.fixture(name="v2_yaml")
+def fixture_v2_yaml(tmp_path):
     path = tmp_path / "ui_v2.yaml"
     path.write_text(
         f"""

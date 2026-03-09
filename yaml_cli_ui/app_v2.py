@@ -31,6 +31,7 @@ from .ui.log_views import map_step_status, render_step_result_text
 from .ui.status import status_to_color
 from .v2.context import build_runtime_context, context_to_mapping
 from .v2.executor import execute_callable_name
+from .v2.errors import V2Error
 from .v2.loader import load_v2_document
 from .v2.models import ParamDef, ParamType, SecretSource, StepResult, V2Document
 
@@ -256,7 +257,7 @@ class AppV2(tk.Tk):
                     secret_values=self._secret_values(values, launcher_name),
                 )
                 self.after(0, self._complete_run, rec.run_id, launcher_name, status, result, text)
-            except Exception as exc:  # noqa: BLE001
+            except (V2Error, OSError, ValueError, TypeError, RuntimeError) as exc:
                 self.after(0, self._complete_run, rec.run_id, launcher_name, "failed", None, str(exc))
 
         threading.Thread(target=worker, daemon=True).start()

@@ -71,8 +71,7 @@ def create_v2_form_fields(
             continue
 
         value = initial_values.get(name, _default_value(param))
-        widget = _create_widget(parent, param, value)
-        fields[name] = FormField(name, param, widget)
+        fields[name] = FormField(name, param, _create_widget(parent, param, value))
 
     parent.columnconfigure(1, weight=1)
     return fields
@@ -80,48 +79,38 @@ def create_v2_form_fields(
 
 def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
     ptype = param.type
+    widget: Any
+
     if ptype == ParamType.SECRET and param.source in (SecretSource.ENV, SecretSource.VAULT):
-        entry = ttk.Entry(parent)
-        entry.insert(0, _secret_source_display(param))
-        entry.configure(state="disabled")
-        entry.grid(sticky="ew", padx=5, pady=4)
-        return entry
-    if ptype in (ParamType.STRING, ParamType.INT, ParamType.FLOAT, ParamType.SECRET):
-        entry = ttk.Entry(parent, show="*" if ptype == ParamType.SECRET else "")
+        widget = ttk.Entry(parent)
+        widget.insert(0, _secret_source_display(param))
+        widget.configure(state="disabled")
+    elif ptype in (ParamType.STRING, ParamType.INT, ParamType.FLOAT, ParamType.SECRET):
+        widget = ttk.Entry(parent, show="*" if ptype == ParamType.SECRET else "")
         if value not in (None, ""):
-            entry.insert(0, str(value))
-        entry.grid(sticky="ew", padx=5, pady=4)
-        return entry
-    if ptype == ParamType.TEXT:
-        text = tk.Text(parent, height=4)
+            widget.insert(0, str(value))
+    elif ptype == ParamType.TEXT:
+        widget = tk.Text(parent, height=4)
         if value not in (None, ""):
-            text.insert("1.0", str(value))
-        text.grid(sticky="ew", padx=5, pady=4)
-        return text
-    if ptype == ParamType.BOOL:
+            widget.insert("1.0", str(value))
+    elif ptype == ParamType.BOOL:
         var = tk.BooleanVar(value=bool(value))
-        check = ttk.Checkbutton(parent, variable=var)
-        check.var = var
-        check.grid(sticky="w", padx=5, pady=4)
-        return check
-    if ptype == ParamType.CHOICE:
-        combo = ttk.Combobox(parent, values=list(param.options or []), state="readonly")
+        widget = ttk.Checkbutton(parent, variable=var)
+        widget.var = var
+    elif ptype == ParamType.CHOICE:
+        widget = ttk.Combobox(parent, values=list(param.options or []), state="readonly")
         if value not in (None, ""):
-            combo.set(str(value))
-        combo.grid(sticky="ew", padx=5, pady=4)
-        return combo
-    if ptype == ParamType.MULTICHOICE:
-        listbox = tk.Listbox(parent, selectmode="multiple", exportselection=False, height=5)
+            widget.set(str(value))
+    elif ptype == ParamType.MULTICHOICE:
+        widget = tk.Listbox(parent, selectmode="multiple", exportselection=False, height=5)
         options = [str(x) for x in (param.options or [])]
         for opt in options:
-            listbox.insert("end", opt)
+            widget.insert("end", opt)
         selected = set(value) if isinstance(value, list) else set()
         for idx, opt in enumerate(options):
             if opt in selected:
-                listbox.selection_set(idx)
-        listbox.grid(sticky="ew", padx=5, pady=4)
-        return listbox
-    if ptype in (ParamType.FILEPATH, ParamType.DIRPATH):
+                widget.selection_set(idx)
+    elif ptype in (ParamType.FILEPATH, ParamType.DIRPATH):
         frame = ttk.Frame(parent)
         entry = ttk.Entry(frame)
         if value not in (None, ""):
@@ -135,21 +124,19 @@ def _create_widget(parent: tk.Widget, param: ParamDef, value: Any) -> Any:
                 entry.insert(0, selected)
 
         ttk.Button(frame, text="Browse", command=browse).pack(side="left", padx=(6, 0))
-        frame.grid(sticky="ew", padx=5, pady=4)
         frame.entry = entry
-        return frame
-    if ptype in (ParamType.KV_LIST, ParamType.STRUCT_LIST):
-        text = tk.Text(parent, height=5)
+        widget = frame
+    elif ptype in (ParamType.KV_LIST, ParamType.STRUCT_LIST):
+        widget = tk.Text(parent, height=5)
         if value not in (None, ""):
-            text.insert("1.0", yaml.safe_dump(value, allow_unicode=True))
-        text.grid(sticky="ew", padx=5, pady=4)
-        return text
+            widget.insert("1.0", yaml.safe_dump(value, allow_unicode=True))
+    else:
+        widget = ttk.Entry(parent)
+        if value not in (None, ""):
+            widget.insert(0, str(value))
 
-    entry = ttk.Entry(parent)
-    if value not in (None, ""):
-        entry.insert(0, str(value))
-    entry.grid(sticky="ew", padx=5, pady=4)
-    return entry
+    widget.grid(sticky="ew", padx=5, pady=4)
+    return widget
 
 
 def _resolve_secret_value(param: ParamDef, raw_value: Any) -> Any:
@@ -195,33 +182,38 @@ def collect_v2_form_values(fields: dict[str, FormField]) -> tuple[dict[str, Any]
 
 def _read_widget_value(widget: Any, param: ParamDef) -> Any:
     ptype = param.type
+    value: Any
+
     if ptype == ParamType.TEXT:
-        return widget.get("1.0", "end").strip()
-    if ptype == ParamType.BOOL:
-        return bool(widget.var.get())
-    if ptype == ParamType.MULTICHOICE:
-        return [widget.get(i) for i in widget.curselection()]
-    if ptype in (ParamType.FILEPATH, ParamType.DIRPATH):
-        return widget.entry.get().strip()
-    if ptype in (ParamType.KV_LIST, ParamType.STRUCT_LIST):
+        value = widget.get("1.0", "end").strip()
+    elif ptype == ParamType.BOOL:
+        value = bool(widget.var.get())
+    elif ptype == ParamType.MULTICHOICE:
+        value = [widget.get(i) for i in widget.curselection()]
+    elif ptype in (ParamType.FILEPATH, ParamType.DIRPATH):
+        value = widget.entry.get().strip()
+    elif ptype in (ParamType.KV_LIST, ParamType.STRUCT_LIST):
         raw = widget.get("1.0", "end").strip()
         parsed = [] if not raw else yaml.safe_load(raw)
         if not isinstance(parsed, list):
             raise ValueError("must be a list")
-        return parsed
+        value = parsed
+    else:
+        raw = widget.get().strip() if hasattr(widget, "get") else ""
+        if ptype == ParamType.INT and raw != "":
+            try:
+                value = int(raw)
+            except ValueError as exc:
+                raise ValueError("must be an integer") from exc
+        elif ptype == ParamType.FLOAT and raw != "":
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise ValueError("must be a float") from exc
+        else:
+            value = raw
 
-    raw = widget.get().strip() if hasattr(widget, "get") else ""
-    if ptype == ParamType.INT and raw != "":
-        try:
-            return int(raw)
-        except ValueError as exc:
-            raise ValueError("must be an integer") from exc
-    if ptype == ParamType.FLOAT and raw != "":
-        try:
-            return float(raw)
-        except ValueError as exc:
-            raise ValueError("must be a float") from exc
-    return raw
+    return value
 
 
 def apply_values_to_v2_form(fields: dict[str, FormField], values: dict[str, Any]) -> None:
