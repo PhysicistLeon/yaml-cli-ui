@@ -34,6 +34,8 @@ ParamValueMap := map of param_id -> stored_value, excluding secret params.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -66,30 +68,95 @@ def _default_state_payload() -> dict[str, Any]:
 
 def _read_json(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise V2PersistenceError(f"Invalid JSON in {path}: {exc}") from exc
     except OSError as exc:
         raise V2PersistenceError(f"Cannot read {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise V2PersistenceError(f"Invalid JSON root in {path}: object required")
+    return payload
 
 
 def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.tmp")
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+    tmp_name: str | None = None
     try:
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f"{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(serialized)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
     except OSError as exc:
         raise V2PersistenceError(f"Cannot write {path}: {exc}") from exc
+    finally:
+        if tmp_name and os.path.exists(tmp_name):
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
 
 
-def _validate_top(payload: Mapping[str, Any]) -> None:
+def _expect_mapping(value: Any, what: str) -> Mapping[str, Any]:
+    if not isinstance(value, dict):
+        raise V2PersistenceError(f"Invalid storage format: '{what}' must be an object")
+    return value
+
+
+def _validate_presets_payload(payload: Mapping[str, Any]) -> None:
     if payload.get("version") != V2_STORAGE_VERSION:
         raise V2PersistenceError(
             f"Unsupported v2 persistence version: {payload.get('version')!r}"
         )
-    if not isinstance(payload.get("launchers"), dict):
-        raise V2PersistenceError("Invalid storage format: 'launchers' must be an object")
+    launchers = _expect_mapping(payload.get("launchers"), "launchers")
+    for launcher_name, launcher_payload in launchers.items():
+        launcher_map = _expect_mapping(launcher_payload, f"launchers.{launcher_name}")
+        presets = launcher_map.get("presets")
+        if presets is None:
+            continue
+        presets_map = _expect_mapping(presets, f"launchers.{launcher_name}.presets")
+        for preset_name, preset_payload in presets_map.items():
+            preset_map = _expect_mapping(
+                preset_payload, f"launchers.{launcher_name}.presets.{preset_name}"
+            )
+            if "params" in preset_map:
+                _expect_mapping(
+                    preset_map.get("params"),
+                    f"launchers.{launcher_name}.presets.{preset_name}.params",
+                )
+
+
+def _validate_state_payload(payload: Mapping[str, Any]) -> None:
+    if payload.get("version") != V2_STORAGE_VERSION:
+        raise V2PersistenceError(
+            f"Unsupported v2 persistence version: {payload.get('version')!r}"
+        )
+    selected_profile = payload.get("selected_profile")
+    if selected_profile is not None and not isinstance(selected_profile, str):
+        raise V2PersistenceError("Invalid storage format: 'selected_profile' must be string|null")
+
+    launchers = _expect_mapping(payload.get("launchers"), "launchers")
+    for launcher_name, launcher_payload in launchers.items():
+        launcher_map = _expect_mapping(launcher_payload, f"launchers.{launcher_name}")
+        if "last_values" in launcher_map:
+            _expect_mapping(launcher_map.get("last_values"), f"launchers.{launcher_name}.last_values")
+        if "last_selected_preset" in launcher_map:
+            selected_preset = launcher_map.get("last_selected_preset")
+            if selected_preset is not None and not isinstance(selected_preset, str):
+                raise V2PersistenceError(
+                    "Invalid storage format: "
+                    f"'launchers.{launcher_name}.last_selected_preset' must be string|null"
+                )
 
 
 def load_v2_presets(config_path: str | Path) -> dict[str, Any]:
@@ -97,13 +164,13 @@ def load_v2_presets(config_path: str | Path) -> dict[str, Any]:
     if not path.exists():
         return _default_presets_payload()
     payload = _read_json(path)
-    _validate_top(payload)
+    _validate_presets_payload(payload)
     return payload
 
 
 def save_v2_presets(config_path: str | Path, data: Mapping[str, Any]) -> None:
     payload = dict(data)
-    _validate_top(payload)
+    _validate_presets_payload(payload)
     _atomic_write_json(get_v2_presets_path(config_path), payload)
 
 
@@ -112,13 +179,13 @@ def load_v2_state(config_path: str | Path) -> dict[str, Any]:
     if not path.exists():
         return _default_state_payload()
     payload = _read_json(path)
-    _validate_top(payload)
+    _validate_state_payload(payload)
     return payload
 
 
 def save_v2_state(config_path: str | Path, data: Mapping[str, Any]) -> None:
     payload = dict(data)
-    _validate_top(payload)
+    _validate_state_payload(payload)
     _atomic_write_json(get_v2_state_path(config_path), payload)
 
 
@@ -154,15 +221,36 @@ class LauncherPersistenceService:
     def __init__(self, config_path: str | Path, doc: V2Document):
         self.config_path = Path(config_path).expanduser()
         self.doc = doc
-        self.last_warning: str | None = None
+        self.warnings: list[str] = []
         self._presets = _default_presets_payload()
         self._state = _default_state_payload()
+
+    @property
+    def last_warning(self) -> str | None:
+        """Backward-compatible convenience alias for last warning."""
+
+        return self.warnings[-1] if self.warnings else None
+
+    def _record_warning(self, message: str) -> None:
+        self.warnings.append(message)
+
+    def _filter_editable_values(self, launcher_name: str, values: Mapping[str, Any]) -> dict[str, Any]:
+        allowed = set(self.doc.params.keys())
+        allowed -= set(self.doc.launchers[launcher_name].with_values.keys())
+        filtered: dict[str, Any] = {}
+        for key, value in values.items():
+            if key not in allowed:
+                continue
+            if self.doc.params[key].type == ParamType.SECRET:
+                continue
+            filtered[key] = value
+        return filtered
 
     def load_presets(self) -> dict[str, Any]:
         try:
             self._presets = load_v2_presets(self.config_path)
         except V2PersistenceError as exc:
-            self.last_warning = str(exc)
+            self._record_warning(str(exc))
             self._presets = _default_presets_payload()
         return self._presets
 
@@ -173,7 +261,7 @@ class LauncherPersistenceService:
         try:
             self._state = load_v2_state(self.config_path)
         except V2PersistenceError as exc:
-            self.last_warning = str(exc)
+            self._record_warning(str(exc))
             self._state = _default_state_payload()
         return self._state
 
@@ -201,7 +289,7 @@ class LauncherPersistenceService:
         params = preset.get("params")
         if not isinstance(params, dict):
             return None
-        return {"params": dict(params)}
+        return {"params": self._filter_editable_values(launcher_name, params)}
 
     def upsert_preset(
         self,
@@ -230,39 +318,21 @@ class LauncherPersistenceService:
         preset = self.get_preset(launcher_name, preset_name)
         if not preset:
             return {}
-        allowed = set(self.doc.params.keys())
-        allowed -= set(self.doc.launchers[launcher_name].with_values.keys())
-        filtered: dict[str, Any] = {}
-        for key, value in preset["params"].items():
-            if key not in allowed:
-                continue
-            if self.doc.params[key].type == ParamType.SECRET:
-                continue
-            filtered[key] = value
-        return filtered
+        return self._filter_editable_values(launcher_name, preset["params"])
 
     def get_last_values(self, launcher_name: str) -> dict[str, Any]:
         launcher_state = self._ensure_launcher_state(launcher_name)
         values = launcher_state.get("last_values")
         if not isinstance(values, dict):
             return {}
-        return self.apply_known_editable_values(launcher_name, values)
+        return self._filter_editable_values(launcher_name, values)
 
     def apply_known_editable_values(
         self,
         launcher_name: str,
         values: Mapping[str, Any],
     ) -> dict[str, Any]:
-        allowed = set(self.doc.params.keys())
-        allowed -= set(self.doc.launchers[launcher_name].with_values.keys())
-        filtered: dict[str, Any] = {}
-        for key, value in values.items():
-            if key not in allowed:
-                continue
-            if self.doc.params[key].type == ParamType.SECRET:
-                continue
-            filtered[key] = value
-        return filtered
+        return self._filter_editable_values(launcher_name, values)
 
     def set_last_values(self, launcher_name: str, params: Mapping[str, Any]) -> None:
         launcher_state = self._ensure_launcher_state(launcher_name)

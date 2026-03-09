@@ -36,3 +36,22 @@ Unknown/removed fields in presets/state are ignored.
 - automatic v1 -> v2 storage migration
 - cloud sync / shared remote persistence
 - vault file format design
+
+
+## Error fallback and warnings
+
+On malformed/broken v2 persistence files, the service uses safe defaults (empty presets/state)
+instead of crashing the app, and accumulates warnings in `LauncherPersistenceService.warnings`
+(`last_warning` remains available as a convenience alias).
+
+`AppV2` shows one aggregated warning message per reload when such warnings exist.
+
+## Editable-value filtering consistency
+
+The same editable filter is applied when reading `last_values` and applying presets:
+
+- unknown fields are ignored
+- secret params are ignored
+- `launcher.with` params are ignored
+
+This keeps restored/applied values aligned with launcher editable fields only.

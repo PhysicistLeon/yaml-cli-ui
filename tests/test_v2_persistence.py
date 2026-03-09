@@ -79,39 +79,90 @@ def test_state_roundtrip(tmp_path: Path):
 
 def test_secret_sanitization_strips_secret_and_with_values():
     doc = _doc()
-    values = {"name": "alice", "token": "plain", "mode": "override"}
+    values = {"name": "alice", "token": "plain", "mode": "override", "ghost": "x"}
     assert sanitize_param_values_for_storage(doc, "ingest", values) == {"name": "alice"}
 
 
-def test_unknown_fields_ignored_on_apply(tmp_path: Path):
+def test_unknown_fields_ignored_on_apply_and_get_preset(tmp_path: Path):
     service = LauncherPersistenceService(tmp_path / "x.yaml", _doc())
     service.load_presets()
     service._presets["launchers"] = {
-        "ingest": {"presets": {"p1": {"params": {"name": "alice", "ghost": 1, "token": "x"}}}}
+        "ingest": {"presets": {"p1": {"params": {"name": "alice", "ghost": 1, "token": "x", "mode": "x"}}}}
     }
+    assert service.get_preset("ingest", "p1") == {"params": {"name": "alice"}}
     assert service.apply_preset_values("ingest", "p1") == {"name": "alice"}
 
 
-def test_broken_json_raises_and_service_falls_back(tmp_path: Path):
+def test_broken_json_raises_and_service_falls_back_with_warnings(tmp_path: Path):
     cfg = tmp_path / "bad.yaml"
     get_v2_presets_path(cfg).write_text("{oops", encoding="utf-8")
+    get_v2_state_path(cfg).write_text("{oops", encoding="utf-8")
     with pytest.raises(V2PersistenceError):
         load_v2_presets(cfg)
+    with pytest.raises(V2PersistenceError):
+        load_v2_state(cfg)
 
     service = LauncherPersistenceService(cfg, _doc())
     assert service.load_presets() == {"version": 2, "launchers": {}}
+    assert service.load_state() == {"version": 2, "selected_profile": None, "launchers": {}}
+    assert len(service.warnings) == 2
     assert service.last_warning is not None
 
 
-def test_atomic_save_writes_valid_json(tmp_path: Path):
+def test_invalid_version_and_structure_errors(tmp_path: Path):
+    cfg = tmp_path / "badshape.yaml"
+
+    get_v2_presets_path(cfg).write_text('{"version": 1, "launchers": {}}', encoding="utf-8")
+    with pytest.raises(V2PersistenceError):
+        load_v2_presets(cfg)
+
+    get_v2_state_path(cfg).write_text('{"version": 1, "launchers": {}}', encoding="utf-8")
+    with pytest.raises(V2PersistenceError):
+        load_v2_state(cfg)
+
+    get_v2_state_path(cfg).write_text('{"version": 2, "selected_profile": 123, "launchers": {}}', encoding="utf-8")
+    with pytest.raises(V2PersistenceError):
+        load_v2_state(cfg)
+
+    get_v2_presets_path(cfg).write_text('{"version": 2, "launchers": []}', encoding="utf-8")
+    with pytest.raises(V2PersistenceError):
+        load_v2_presets(cfg)
+
+    get_v2_state_path(cfg).write_text(
+        '{"version": 2, "launchers": {"ingest": {"last_values": []}}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(V2PersistenceError):
+        load_v2_state(cfg)
+
+
+def test_service_fallback_on_invalid_structure(tmp_path: Path):
+    cfg = tmp_path / "broken.json"
+    get_v2_presets_path(cfg).write_text('{"version": 2, "launchers": []}', encoding="utf-8")
+    get_v2_state_path(cfg).write_text(
+        '{"version": 2, "selected_profile": 123, "launchers": {}}',
+        encoding="utf-8",
+    )
+    service = LauncherPersistenceService(cfg, _doc())
+    assert service.load_presets() == {"version": 2, "launchers": {}}
+    assert service.load_state() == {"version": 2, "selected_profile": None, "launchers": {}}
+    assert len(service.warnings) == 2
+
+
+def test_atomic_save_writes_valid_json_over_multiple_cycles(tmp_path: Path):
     cfg = tmp_path / "atomic.yaml"
     service = LauncherPersistenceService(cfg, _doc())
     service.load_presets()
-    service.upsert_preset("ingest", "p1", {"name": "alice", "token": "secret"})
 
-    text = get_v2_presets_path(cfg).read_text(encoding="utf-8")
-    parsed = json.loads(text)
-    assert parsed["launchers"]["ingest"]["presets"]["p1"]["params"] == {"name": "alice"}
+    for idx in range(5):
+        service.upsert_preset("ingest", f"p{idx}", {"name": f"alice-{idx}", "token": "secret"})
+        text = get_v2_presets_path(cfg).read_text(encoding="utf-8")
+        parsed = json.loads(text)
+        assert parsed["version"] == 2
+        assert "launchers" in parsed
+
+    loaded = load_v2_presets(cfg)
+    assert loaded["launchers"]["ingest"]["presets"]["p4"]["params"] == {"name": "alice-4"}
 
 
 def _maybe_app(path: Path):

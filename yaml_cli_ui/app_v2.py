@@ -144,6 +144,14 @@ class AppV2(tk.Tk):
         self.persistence = LauncherPersistenceService(path, self.doc)
         self.persistence.load_presets()
         self.persistence.load_state()
+        if self.persistence.warnings:
+            unique_warnings = list(dict.fromkeys(self.persistence.warnings))
+            messagebox.showwarning(
+                "Persistence warning",
+                "Using safe defaults for v2 persistence due to errors\n\n"
+                + "\n".join(unique_warnings),
+                parent=self,
+            )
         self._clear_launcher_views()
         self._render_profile_selector()
         self._render_launchers()
