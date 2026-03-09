@@ -1,6 +1,6 @@
 import pytest
 
-from v2_test_utils import load_fixture_doc
+from tests.v2_test_utils import load_fixture_doc
 from yaml_cli_ui.v2.context import build_runtime_context, resolve_selected_profile
 from yaml_cli_ui.v2.errors import V2ExecutionError
 from yaml_cli_ui.v2.models import ProfileDef, V2Document
@@ -15,13 +15,15 @@ def test_locals_are_evaluated_sequentially():
     assert ctx.locals["urls_file"] == "/work/runs/weekly/spool/urls.json"
 
 
-def test_imported_locals_and_root_local_using_imported_values():
+def test_imported_locals_are_namespaced_and_not_auto_merged_into_root_locals():
     doc = load_fixture_doc("valid_locals.yaml")
-    ctx = build_runtime_context(doc, params={"collection": "x"}, selected_profile_name="home")
+    mapping = build_runtime_context(doc, params={"collection": "x"}, selected_profile_name="home").as_mapping()
 
-    assert ctx.imported["media"]["scrape_script"] == "scripts/scrape.py"
-    assert ctx.imported["fs"]["ensure_dir_script"] == "scripts/ensure_dir.py"
-    assert ctx.locals["media_script"] == "scripts/scrape.py"
+    assert mapping["media"]["locals"]["scrape_script"] == "scripts/scrape.py"
+    assert mapping["fs"]["locals"]["ensure_dir_script"] == "scripts/ensure_dir.py"
+    assert mapping["locals"]["media_script"] == "scripts/scrape.py"
+    assert "scrape_script" not in mapping["locals"]
+    assert "ensure_dir_script" not in mapping["locals"]
 
 
 def test_with_values_override_short_name_only():

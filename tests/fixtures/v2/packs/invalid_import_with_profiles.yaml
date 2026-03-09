@@ -1,0 +1,9 @@
+version: 2
+profiles:
+  dev:
+    workdir: /tmp
+commands:
+  helper:
+    run:
+      program: python
+      argv: [-V]

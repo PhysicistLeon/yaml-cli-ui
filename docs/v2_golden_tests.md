@@ -2,14 +2,17 @@
 
 This document captures the step-10 golden test suite for `yaml_cli_ui.v2`.
 
-## Fixture suite (tests/fixtures/v2)
+## Fixture suite (`tests/fixtures/v2`)
 
 - Loader/import basics: `minimal_root.yaml`, `with_imports_root.yaml`, `packs/media.yaml`, `packs/fs.yaml`
+- Loader negatives: `invalid_missing_import_root.yaml`, `invalid_import_cycle_root.yaml`, `packs/cycle_a.yaml`, `packs/cycle_b.yaml`
 - Locals/context: `valid_locals.yaml`, `invalid_future_local.yaml`
 - Argv DSL: `argv_mixed.yaml`
 - Pipeline/executor flows: `pipeline_success.yaml`, `pipeline_continue_on_error.yaml`, `pipeline_on_error_recovered.yaml`, `foreach_success.yaml`, `foreach_invalid_input.yaml`
-- Validator negatives: `conflict_callable_names.yaml`, `invalid_imported_with_launchers_root.yaml`, `packs/invalid_with_launchers.yaml`
+- Validator negatives: `invalid_callable_collision.yaml`, `invalid_imported_with_launchers_root.yaml`, `packs/invalid_import_with_launchers.yaml`, `invalid_imported_with_profiles_root.yaml`, `packs/invalid_import_with_profiles.yaml`
 - Integration-like smoke case: `full_ingest_like.yaml`
+
+Fixtures intentionally use portable Python snippets; tests may also use fixture placeholder replacement (for example `__PYTHON__` / `__TMPDIR__`) via `tests.v2_test_utils.load_fixture_document(..., replacements=...)`.
 
 ## Golden test layers
 
@@ -24,8 +27,8 @@ This document captures the step-10 golden test suite for `yaml_cli_ui.v2`.
 
 ## Acceptance criteria fixed by this suite
 
-- stable loader/import/base-dir semantics
-- validator checks for callable collisions, imported-root restrictions, and forward local references
+- stable loader/import/base-dir semantics, including missing-import and import-cycle failures
+- validator checks for callable collisions, imported-root restrictions (`launchers`/`profiles`), and forward local references
 - expression/renderer behavior for namespaces, interpolation, escaping, built-ins, and function restrictions
 - context/profile/locals semantics, including imported locals and bindings
 - argv DSL serialization shape and invalid-shape errors

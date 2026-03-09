@@ -1,4 +1,4 @@
-from v2_test_utils import load_fixture_doc, runtime_context
+from tests.v2_test_utils import load_fixture_doc, runtime_context
 from yaml_cli_ui.v2.executor import execute_pipeline_def
 from yaml_cli_ui.v2.validator import validate_v2_document
 

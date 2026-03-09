@@ -1,6 +1,6 @@
 import pytest
 
-from v2_test_utils import load_fixture_doc, runtime_context
+from tests.v2_test_utils import load_fixture_doc, runtime_context
 from yaml_cli_ui.v2.errors import V2ExpressionError
 from yaml_cli_ui.v2.expr import evaluate_expression
 from yaml_cli_ui.v2.renderer import render_scalar_or_ref, render_value

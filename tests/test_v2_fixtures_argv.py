@@ -1,6 +1,6 @@
 import pytest
 
-from v2_test_utils import load_fixture_doc, runtime_context
+from tests.v2_test_utils import load_fixture_doc, runtime_context
 from yaml_cli_ui.v2.argv import serialize_argv
 from yaml_cli_ui.v2.errors import V2ExecutionError
 
@@ -9,7 +9,12 @@ def test_scalar_only_argv_serialization():
     assert serialize_argv(["a", 0, False], {"params": {}, "locals": {}, "bindings": {}}) == ["a", "0", "False"]
 
 
-def test_mixed_argv_fixture_serialization():
+def test_scalar_string_with_spaces_is_not_shell_split():
+    ctx = {"params": {}, "locals": {}, "bindings": {}}
+    assert serialize_argv(["--name value with spaces"], ctx) == ["--name value with spaces"]
+
+
+def test_mixed_argv_fixture_serialization_and_scalar_ref_single_token():
     doc = load_fixture_doc("argv_mixed.yaml")
     cmd = doc.commands["download"]
     ctx = runtime_context(
@@ -30,6 +35,7 @@ def test_mixed_argv_fixture_serialization():
         "/work/%(title)s.%(ext)s",
         "https://e/x",
     ]
+    assert serialize_argv(["$params.source_url"], ctx) == ["https://e/x"]
 
 
 def test_bool_null_empty_list_and_false_string_semantics():
@@ -56,3 +62,5 @@ def test_invalid_argv_shapes_raise_errors():
         serialize_argv([{"--a": 1, "--b": 2}], ctx)
     with pytest.raises(V2ExecutionError, match="must be scalar"):
         serialize_argv(["$params.v"], {"params": {"v": [1]}, "locals": {}, "bindings": {}})
+    with pytest.raises(V2ExecutionError, match="must be scalar"):
+        serialize_argv(["$params.obj"], {"params": {"obj": {"a": 1}}, "locals": {}, "bindings": {}})

@@ -1,6 +1,6 @@
 version: 2
 imports:
-  bad: ./packs/invalid_import_with_launchers.yaml
+  missing_pack: ./packs/does_not_exist.yaml
 commands:
   root_cmd:
     run:

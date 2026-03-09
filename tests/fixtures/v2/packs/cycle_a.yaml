@@ -1,0 +1,8 @@
+version: 2
+imports:
+  b: ./cycle_b.yaml
+commands:
+  a_cmd:
+    run:
+      program: python
+      argv: [-V]

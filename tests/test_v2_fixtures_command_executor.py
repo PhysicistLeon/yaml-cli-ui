@@ -1,7 +1,8 @@
 from pathlib import Path
 
+from tests.v2_test_utils import load_fixture_document
 from yaml_cli_ui.v2.executor import execute_command_def
-from yaml_cli_ui.v2.models import CommandDef, RunSpec, StepStatus, V2Document
+from yaml_cli_ui.v2.models import CommandDef, RunSpec, StepStatus
 
 
 def _ctx(**kwargs):
@@ -28,14 +29,16 @@ def test_command_success_nonzero_stderr_and_timeout(tmp_path: Path):
     assert timeout.error and timeout.error.type == "timeout"
 
 
-def test_runtime_override_workdir_env_and_stream_modes(tmp_path: Path):
+def test_runtime_override_workdir_env_and_stream_modes(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("BASE_FROM_ENV", "base")
+
     stdout_file = tmp_path / "out.txt"
     stderr_file = tmp_path / "err.txt"
     cwd_probe = tmp_path / "cwd.txt"
     command = CommandDef(
         run=RunSpec(
             program="python",
-            argv=["-c", "import os,pathlib,sys; pathlib.Path('cwd.txt').write_text(os.getcwd()); print(os.getenv('A')); sys.stderr.write('se')"],
+            argv=["-c", "import os,pathlib,sys; pathlib.Path('cwd.txt').write_text(os.getcwd()); print(os.getenv('A')); print(os.getenv('BASE_FROM_ENV')); sys.stderr.write('se')"],
             stdout=f"file:{stdout_file}",
             stderr=f"file:{stderr_file}",
             env={"A": "run"},
@@ -48,7 +51,7 @@ def test_runtime_override_workdir_env_and_stream_modes(tmp_path: Path):
 
     assert result.status == StepStatus.SUCCESS
     assert result.stdout is None and result.stderr is None
-    assert stdout_file.read_text().strip() == "run"
+    assert stdout_file.read_text().strip().splitlines() == ["run", "base"]
     assert stderr_file.read_text() == "se"
     assert cwd_probe.exists()
 
@@ -57,3 +60,13 @@ def test_runtime_override_workdir_env_and_stream_modes(tmp_path: Path):
         context=_ctx(),
     )
     assert inherit.status == StepStatus.SUCCESS
+
+
+def test_fixture_replacements_cover_import_subtree(tmp_path: Path):
+    doc = load_fixture_document(
+        "with_imports_root.yaml",
+        replacements={"python": "__PYTHON__", "scripts/ensure_dir.py": "__TMPDIR__/ensure.py"},
+    )
+
+    assert "media" in doc.imported_documents
+    assert doc.imported_documents["fs"].locals["ensure_dir_script"].startswith("__TMPDIR__")

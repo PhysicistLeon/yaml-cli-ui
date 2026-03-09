@@ -1,6 +1,6 @@
 version: 2
 imports:
-  bad: ./packs/invalid_import_with_launchers.yaml
+  cycle: ./packs/cycle_a.yaml
 commands:
   root_cmd:
     run:
