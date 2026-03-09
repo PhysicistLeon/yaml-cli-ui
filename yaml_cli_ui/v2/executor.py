@@ -154,27 +154,24 @@ def execute_command_def(
     result = execute_run_spec(command.run, context=context, step_name=name)
     if result.status != StepStatus.FAILED or command.on_error is None:
         return result
+    if doc is None:
+        raise V2ExecutionError("doc is required to execute command.on_error")
 
     error_context = make_error_context(result, owner_name=name)
     recovery = execute_on_error(
         command.on_error,
-        doc=doc or _context_doc(context),
+        doc=doc,
         context=context,
         error_context=_error_context_to_mapping(error_context) or {},
         owner_name=name,
     )
-    if recovery.status in (StepStatus.SUCCESS, StepStatus.SKIPPED, StepStatus.RECOVERED):
+    if recovery.status in (StepStatus.SUCCESS, StepStatus.SKIPPED):
         result.status = StepStatus.RECOVERED
         result.meta["on_error"] = recovery
         return result
 
+    result.error = error_context
     result.meta["recovery_error"] = _error_context_to_mapping(recovery.error)
-    result.error = ErrorContext(
-        type="command_recovery_failed",
-        message=f"command failed and on_error recovery failed for '{name}'",
-        step=name,
-        exit_code=result.exit_code,
-    )
     result.meta["on_error"] = recovery
     return result
 
@@ -262,16 +259,10 @@ def execute_pipeline_def(
                 owner_name=name,
             )
             base_result.meta["on_error"] = recovery
-            if recovery.status in (StepStatus.SUCCESS, StepStatus.SKIPPED, StepStatus.RECOVERED):
+            if recovery.status in (StepStatus.SUCCESS, StepStatus.SKIPPED):
                 base_result.status = StepStatus.RECOVERED
             else:
                 base_result.meta["recovery_error"] = _error_context_to_mapping(recovery.error)
-                base_result.error = ErrorContext(
-                    type="pipeline_recovery_failed",
-                    message=f"pipeline failed and on_error recovery failed for '{name}'",
-                    step=hard_failure.name,
-                    exit_code=hard_failure.exit_code,
-                )
         return base_result
 
     status = StepStatus.FAILED if had_soft_failures else StepStatus.SUCCESS
@@ -303,7 +294,9 @@ def execute_step(
         step_name = _deduce_step_name(callable_name, generated_name_index, children)
         return execute_callable_name(callable_name, doc=doc, context=context, step_name=step_name)
 
-    if normalized.when is not None and not _evaluate_when(normalized.when, context):
+    step_context = _with_short_bindings(context, normalized.with_values)
+
+    if normalized.when is not None and not _evaluate_when(normalized.when, step_context):
         timestamp = _utcnow()
         return StepResult(
             name=normalized.step or _generated_step_name(generated_name_index),
@@ -324,7 +317,6 @@ def execute_step(
         raise V2ExecutionError("expanded step must define 'use'")
 
     step_name = normalized.step or _deduce_step_name(normalized.use, generated_name_index, children)
-    step_context = _with_short_bindings(context, normalized.with_values)
     return execute_callable_name(normalized.use, doc=doc, context=step_context, step_name=step_name)
 
 
@@ -406,8 +398,6 @@ def execute_on_error(
         context=recovery_context,
         step_name=f"{owner_name}__on_error",
     )
-    if recovery.status == StepStatus.SUCCESS:
-        recovery.status = StepStatus.RECOVERED
     return recovery
 
 
@@ -632,6 +622,11 @@ def _with_short_bindings(context: Mapping[str, Any], with_values: Mapping[str, A
     bindings = dict(context.get("bindings", {})) if isinstance(context.get("bindings"), Mapping) else {}
     bindings.update(rendered)
     merged["bindings"] = bindings
+    protected = {"params", "locals", "profile", "run", "steps", "bindings", "loop", "error"}
+    for key, value in rendered.items():
+        if key in protected:
+            continue
+        merged[key] = value
     return merged
 
 
@@ -649,13 +644,6 @@ def _step_continue_on_error(step: str | StepSpec, doc: V2Document) -> bool:
     if isinstance(callable_def, (CommandDef, PipelineDef)):
         return bool(callable_def.continue_on_error)
     return False
-
-
-def _context_doc(context: Mapping[str, Any]) -> V2Document:
-    doc = context.get("_doc")
-    if not isinstance(doc, V2Document):
-        raise V2ExecutionError("internal context is missing '_doc' document reference")
-    return doc
 
 
 def _copy_steps_mapping(context: Mapping[str, Any]) -> dict[str, Any]:

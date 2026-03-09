@@ -5,7 +5,12 @@ import sys
 import pytest
 
 from yaml_cli_ui.v2.errors import V2ExecutionError
-from yaml_cli_ui.v2.executor import execute_pipeline_def, execute_step, resolve_callable
+from yaml_cli_ui.v2.executor import (
+    execute_command_def,
+    execute_pipeline_def,
+    execute_step,
+    resolve_callable,
+)
 from yaml_cli_ui.v2.models import (
     CommandDef,
     ForeachSpec,
@@ -68,6 +73,16 @@ def test_short_step_syntax_and_unique_name_generation():
     assert list(result.children.keys()) == ["hello", "hello_2"]
 
 
+def test_namespaced_short_step_uses_basename_and_dedupes():
+    imported = V2Document(commands={"fetch": _py_ok("ok")})
+    root = V2Document(imported_documents={"media": imported})
+    pipeline = PipelineDef(steps=["media.fetch", "media.fetch"])
+
+    result = execute_pipeline_def(pipeline, doc=root, context=_base_context())
+
+    assert list(result.children.keys()) == ["fetch", "fetch_2"]
+
+
 def test_expanded_step_with_bindings_overrides_short_name_resolution():
     doc = V2Document(
         commands={
@@ -98,6 +113,24 @@ def test_step_when_false_skips_and_pipeline_continues():
 
     assert result.children["s1"].status == StepStatus.SKIPPED
     assert result.children["ok"].status == StepStatus.SUCCESS
+
+
+def test_step_when_evaluates_after_with_bindings():
+    doc = V2Document(commands={"ok": _py_ok()})
+    pipeline = PipelineDef(
+        steps=[
+            StepSpec(
+                step="bound_step",
+                use="ok",
+                with_values={"mode": "video"},
+                when="${mode == 'video'}",
+            )
+        ]
+    )
+
+    result = execute_pipeline_def(pipeline, doc=doc, context=_base_context())
+
+    assert result.children["bound_step"].status == StepStatus.SUCCESS
 
 
 def test_command_failure_stops_pipeline():
@@ -209,6 +242,29 @@ def test_command_on_error_recovered():
     assert result.children["bad"].status == StepStatus.RECOVERED
 
 
+def test_direct_execute_command_def_on_error_recovered():
+    doc = V2Document(commands={"recover": _py_ok("r")})
+    command = CommandDef(
+        run=RunSpec(program="python", argv=["-c", "import sys; sys.exit(9)"]),
+        on_error=OnErrorSpec(steps=["recover"]),
+    )
+
+    result = execute_command_def(command, context=_base_context(), step_name="bad", doc=doc)
+
+    assert result.status == StepStatus.RECOVERED
+    assert result.meta["on_error"].status == StepStatus.SUCCESS
+
+
+def test_direct_execute_command_def_on_error_requires_doc():
+    command = CommandDef(
+        run=RunSpec(program="python", argv=["-c", "import sys; sys.exit(9)"]),
+        on_error=OnErrorSpec(steps=["recover"]),
+    )
+
+    with pytest.raises(V2ExecutionError, match="doc is required"):
+        execute_command_def(command, context=_base_context(), step_name="bad")
+
+
 def test_pipeline_on_error_recovered_and_failed_recovery():
     recover_doc = V2Document(
         commands={"bad": _py_fail(), "recover": _py_ok()},
@@ -227,7 +283,34 @@ def test_pipeline_on_error_recovered_and_failed_recovery():
         context=_base_context(),
     )
     assert failed.status == StepStatus.FAILED
+    assert failed.error is not None
+    assert failed.error.step == "bad"
     assert failed.meta.get("recovery_error") is not None
+
+
+def test_steps_updated_incrementally_for_next_steps():
+    doc = V2Document(
+        commands={
+            "emit": CommandDef(run=RunSpec(program="python", argv=["-c", "print('alpha')"])),
+            "consume": CommandDef(
+                run=RunSpec(
+                    program="python",
+                    argv=["-c", "import sys; print(sys.argv[1].strip())", "$steps.first.stdout"],
+                )
+            ),
+        }
+    )
+    pipeline = PipelineDef(
+        steps=[
+            StepSpec(step="first", use="emit"),
+            StepSpec(step="second", use="consume"),
+        ]
+    )
+
+    result = execute_pipeline_def(pipeline, doc=doc, context=_base_context())
+
+    assert result.children["second"].status == StepStatus.SUCCESS
+    assert "alpha" in (result.children["second"].stdout or "")
 
 
 def test_resolve_callable_supports_import_namespace():
