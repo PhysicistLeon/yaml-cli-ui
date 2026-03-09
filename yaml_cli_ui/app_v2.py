@@ -13,8 +13,12 @@ AppV2Flow :=
 LauncherDialog :=
   editable params
   fixed/read-only with-bound params
+  only params used by selected launcher callable graph
   validation
   submit -> background execution
+
+LauncherButtonInfo :=
+  launcher.info is shown as hover tooltip only (no inline label)
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from .ui.form_widgets import apply_values_to_v2_form, collect_v2_form_values, cr
 from .ui.history import RunHistoryStore
 from .ui.log_views import map_step_status, render_step_result_text
 from .ui.status import status_to_color
+from .ui.tooltips import TooltipController, normalize_tooltip_text
 from .v2.context import build_runtime_context, context_to_mapping
 from .v2.executor import execute_callable_name
 from .v2.errors import V2Error
@@ -55,12 +60,117 @@ def resolve_profile_ui_state(doc: V2Document) -> tuple[bool, str | None, list[st
 
 
 def launcher_param_plan(doc: V2Document, launcher_name: str) -> tuple[dict[str, ParamDef], dict[str, Any]]:
-    """Conservative plan: editable root params minus launcher.with; fixed = launcher.with."""
+    """Build launcher form plan from params actually used by target callable graph."""
 
     launcher = doc.launchers[launcher_name]
-    fixed = dict(launcher.with_values)
-    editable = {name: param for name, param in doc.params.items() if name not in fixed}
+    used_params = collect_used_params_for_launcher(doc, launcher_name)
+    fixed = {name: value for name, value in launcher.with_values.items() if name in used_params}
+    editable = {
+        name: param for name, param in doc.params.items() if name in used_params and name not in fixed
+    }
     return editable, fixed
+
+
+def collect_used_params_for_launcher(doc: V2Document, launcher_name: str) -> set[str]:
+    launcher = doc.launchers[launcher_name]
+    used = set()
+    visited: set[str] = set()
+    used.update(_collect_used_params_from_value(doc.locals))
+    used.update(_collect_used_params_from_value(launcher.with_values))
+    used.update(_collect_used_params_for_callable(doc, launcher.use, visited))
+    return {name for name in used if name in doc.params}
+
+
+def _collect_used_params_for_callable(
+    doc: V2Document,
+    callable_name: str,
+    visited: set[str],
+) -> set[str]:
+    if callable_name in visited:
+        return set()
+    visited.add(callable_name)
+
+    used: set[str] = set()
+    if callable_name in doc.commands:
+        command = doc.commands[callable_name]
+        used.update(_collect_used_params_from_value(command.when))
+        used.update(_collect_used_params_from_value(command.run.program))
+        used.update(_collect_used_params_from_value(command.run.argv))
+        used.update(_collect_used_params_from_value(command.run.workdir))
+        used.update(_collect_used_params_from_value(command.run.env))
+        if command.on_error:
+            used.update(_collect_used_params_for_steps(doc, command.on_error.steps, visited))
+        return used
+
+    pipeline = doc.pipelines.get(callable_name)
+    if pipeline is None:
+        return used
+    used.update(_collect_used_params_from_value(pipeline.when))
+    used.update(_collect_used_params_for_steps(doc, pipeline.steps, visited))
+    if pipeline.on_error:
+        used.update(_collect_used_params_for_steps(doc, pipeline.on_error.steps, visited))
+    return used
+
+
+def _collect_used_params_for_steps(doc: V2Document, steps: list[Any], visited: set[str]) -> set[str]:
+    used: set[str] = set()
+    for raw_step in steps:
+        if isinstance(raw_step, str):
+            used.update(_collect_used_params_for_callable(doc, raw_step, visited))
+            continue
+        step = raw_step
+        used.update(_collect_used_params_from_value(step.when))
+        used.update(_collect_used_params_from_value(step.with_values))
+        if step.is_use_step and step.use:
+            used.update(_collect_used_params_for_callable(doc, step.use, visited))
+            continue
+        if step.foreach:
+            used.update(_collect_used_params_from_value(step.foreach.in_expr))
+            used.update(_collect_used_params_for_steps(doc, step.foreach.steps, visited))
+    return used
+
+
+def _collect_used_params_from_value(value: Any) -> set[str]:
+    used: set[str] = set()
+    if isinstance(value, str):
+        used.update(_extract_param_refs(value))
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            used.update(_collect_used_params_from_value(key))
+            used.update(_collect_used_params_from_value(item))
+    elif isinstance(value, list):
+        for item in value:
+            used.update(_collect_used_params_from_value(item))
+    return used
+
+
+def _extract_param_refs(text: str) -> set[str]:
+    refs: set[str] = set()
+    idx = 0
+    while idx < len(text):
+        start = text.find("$params.", idx)
+        braced_start = text.find("${params.", idx)
+        if start == -1 and braced_start == -1:
+            break
+        if start == -1 or (braced_start != -1 and braced_start < start):
+            name_start = braced_start + len("${params.")
+            name_end = name_start
+            while name_end < len(text) and (text[name_end].isalnum() or text[name_end] == "_"):
+                name_end += 1
+            if name_end < len(text) and text[name_end] == "}" and name_end > name_start:
+                refs.add(text[name_start:name_end])
+                idx = name_end + 1
+                continue
+            idx = name_start
+            continue
+        name_start = start + len("$params.")
+        name_end = name_start
+        while name_end < len(text) and (text[name_end].isalnum() or text[name_end] == "_"):
+            name_end += 1
+        if name_end > name_start:
+            refs.add(text[name_start:name_end])
+        idx = name_end
+    return refs
 
 
 def _param_has_ready_value(param: ParamDef) -> bool:
@@ -120,6 +230,7 @@ class AppV2(tk.Tk):
         self.profile_var = tk.StringVar(value="")
         self.profile_combo: ttk.Combobox | None = None
         self.persistence: LauncherPersistenceService | None = None
+        self.tooltip = TooltipController(self)
 
         header = ttk.Frame(self)
         header.pack(fill="x", padx=10, pady=10)
@@ -169,6 +280,7 @@ class AppV2(tk.Tk):
         self._render_launchers()
 
     def _clear_launcher_views(self) -> None:
+        self.tooltip.hide()
         for tab_id in self.output_notebook.tabs()[1:]:
             self.output_notebook.forget(tab_id)
         self.launcher_buttons.clear()
@@ -226,7 +338,12 @@ class AppV2(tk.Tk):
             row.pack(fill="x", pady=3)
             btn = tk.Button(row, text=launcher.title, command=lambda n=name: self.start_launcher(n))
             btn.pack(side="left")
-            ttk.Label(row, text=launcher.info or "").pack(side="left", padx=8)
+            info = normalize_tooltip_text(launcher.info)
+            if info is not None:
+                btn.bind("<Enter>", lambda _event, b=btn, text=info: self.tooltip.schedule(b, text))
+                btn.bind("<Leave>", lambda _event: self.tooltip.hide())
+                btn.bind("<ButtonPress>", lambda _event: self.tooltip.hide())
+                btn.bind("<FocusOut>", lambda _event: self.tooltip.hide())
             status = tk.Label(row, text=" idle ", bg=status_to_color("idle"))
             status.pack(side="right")
             self.launcher_buttons[name] = btn
@@ -250,7 +367,7 @@ class AppV2(tk.Tk):
         assert self.doc is not None
         editable, fixed = launcher_param_plan(self.doc, launcher_name)
 
-        needs_dialog = any(not _param_has_ready_value(param) for param in editable.values())
+        needs_dialog = bool(editable) and any(not _param_has_ready_value(param) for param in editable.values())
         if not needs_dialog:
             self._execute_in_background(launcher_name, {})
             return

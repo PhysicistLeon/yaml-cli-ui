@@ -3,11 +3,13 @@
 import sys
 import time
 import tkinter as tk
+from tkinter import ttk
 
 import pytest
 
 from yaml_cli_ui.app_v2 import (
     AppV2,
+    collect_used_params_for_launcher,
     launcher_param_plan,
     resolve_profile_ui_state,
     run_launcher,
@@ -15,10 +17,13 @@ from yaml_cli_ui.app_v2 import (
 from yaml_cli_ui.v2.loader import load_v2_document
 from yaml_cli_ui.v2.persistence import save_v2_presets, save_v2_state
 from yaml_cli_ui.v2.models import (
+    CommandDef,
     LauncherDef,
     ParamDef,
     ParamType,
+    PipelineDef,
     ProfileDef,
+    RunSpec,
     V2Document,
 )
 
@@ -90,6 +95,9 @@ def test_launcher_param_plan_with_fixed_bindings():
             "x": ParamDef(type=ParamType.STRING),
             "y": ParamDef(type=ParamType.STRING),
         },
+        commands={
+            "c": CommandDef(run=RunSpec(program="echo", argv=["$params.x", "$params.y"]))
+        },
         launchers={
             "l": LauncherDef(title="L", use="c", with_values={"y": "fixed"}),
         },
@@ -99,6 +107,30 @@ def test_launcher_param_plan_with_fixed_bindings():
 
     assert set(editable.keys()) == {"x"}
     assert fixed == {"y": "fixed"}
+
+
+def test_collect_used_params_for_launcher_pipeline_graph():
+    doc = V2Document(
+        params={
+            "source_url": ParamDef(type=ParamType.STRING),
+            "collection": ParamDef(type=ParamType.STRING),
+            "unused_param": ParamDef(type=ParamType.STRING),
+        },
+        commands={
+            "fetch": CommandDef(run=RunSpec(program="curl", argv=["$params.source_url"])),
+            "save": CommandDef(run=RunSpec(program="echo", argv=["$params.collection"])),
+        },
+        pipelines={
+            "ingest": PipelineDef(steps=["fetch", "save"])
+        },
+        launchers={"ingest": LauncherDef(title="Ingest", use="ingest")},
+    )
+
+    used = collect_used_params_for_launcher(doc, "ingest")
+
+    assert "source_url" in used
+    assert "collection" in used
+    assert "unused_param" not in used
 
 
 def test_run_launcher_executes(v2_yaml):
@@ -116,6 +148,33 @@ def test_app_v2_renders_launchers_and_profiles(v2_yaml):
         assert "run_hello" in app.launcher_buttons
         assert app.profile_combo is not None
         assert app.profile_var.get() in {"fast", "safe"}
+        launcher_row_children = app.launcher_buttons["run_hello"].master.winfo_children()
+        assert len(launcher_row_children) == 2  # button + status (no inline info label)
+        assert app.launcher_buttons["run_hello"].bind("<Enter>")
+    finally:
+        app.destroy()
+
+
+def test_launcher_without_info_has_no_tooltip_binding(tmp_path):
+    path = tmp_path / "no_info.yaml"
+    path.write_text(
+        f"""
+version: 2
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('ok')"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    app = _maybe_app(path)
+    try:
+        assert not app.launcher_buttons["l"].bind("<Enter>")
     finally:
         app.destroy()
 
@@ -178,6 +237,127 @@ launchers:
         app._execute_in_background = fake_exec  # type: ignore[method-assign]
         app.start_launcher("l")
         assert calls == [{"name": "l", "values": {}}]
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_without_editable_params_autoruns(tmp_path):
+    path = tmp_path / "fixed_only.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  collection:
+    type: string
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('$params.collection')"]
+launchers:
+  l:
+    title: L
+    use: hello
+    with:
+      collection: fixed
+""",
+        encoding="utf-8",
+    )
+    app = _maybe_app(path)
+    try:
+        calls: list[dict[str, str]] = []
+
+        def fake_exec(name, values):
+            calls.append({"name": name, "values": values})
+
+        app._execute_in_background = fake_exec  # type: ignore[method-assign]
+        app.start_launcher("l")
+        assert calls == [{"name": "l", "values": {}}]
+    finally:
+        app.destroy()
+
+
+def test_start_launcher_opens_dialog_when_required_input_needed(tmp_path, monkeypatch):
+    path = tmp_path / "dialog_needed.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  source_url:
+    type: string
+    required: true
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('$params.source_url')"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    app = _maybe_app(path)
+    dialogs = []
+    original_toplevel = tk.Toplevel
+
+    def spy_toplevel(*args, **kwargs):
+        dialogs.append(True)
+        return original_toplevel(*args, **kwargs)
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.tk.Toplevel", spy_toplevel)
+    try:
+        app.start_launcher("l")
+        assert dialogs
+    finally:
+        app.destroy()
+
+
+def test_dialog_validation_error_blocks_execution(tmp_path, monkeypatch):
+    path = tmp_path / "validation.yaml"
+    path.write_text(
+        f"""
+version: 2
+params:
+  source_url:
+    type: string
+    required: true
+commands:
+  hello:
+    run:
+      program: "{sys.executable}"
+      argv: ["-c", "print('$params.source_url')"]
+launchers:
+  l:
+    title: L
+    use: hello
+""",
+        encoding="utf-8",
+    )
+    app = _maybe_app(path)
+    run_command = None
+    errors = []
+    executed = []
+    original_button = ttk.Button
+
+    def spy_button(*args, **kwargs):
+        nonlocal run_command
+        button = original_button(*args, **kwargs)
+        if kwargs.get("text") == "Run":
+            run_command = kwargs.get("command")
+        return button
+
+    monkeypatch.setattr("yaml_cli_ui.app_v2.ttk.Button", spy_button)
+    monkeypatch.setattr("yaml_cli_ui.app_v2.collect_v2_form_values", lambda _fields: ({}, ["source_url is required"]))
+    monkeypatch.setattr("yaml_cli_ui.app_v2.messagebox.showerror", lambda _t, msg, parent=None: errors.append(msg))
+    app._execute_in_background = lambda _n, _v: executed.append(True)  # type: ignore[method-assign]
+    try:
+        app.start_launcher("l")
+        assert run_command is not None
+        run_command()
+        assert errors == ["source_url is required"]
+        assert executed == []
     finally:
         app.destroy()
 
