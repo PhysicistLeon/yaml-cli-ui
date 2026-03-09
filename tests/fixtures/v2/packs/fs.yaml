@@ -1,0 +1,11 @@
+version: 2
+locals:
+  ensure_dir_script: "import pathlib,sys; pathlib.Path(sys.argv[1]).mkdir(parents=True, exist_ok=True); print('dir-ok')"
+commands:
+  ensure_dir:
+    run:
+      program: python
+      argv:
+        - -c
+        - $locals.ensure_dir_script
+        - $params.target_dir

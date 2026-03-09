@@ -1,0 +1,47 @@
+version: 2
+imports:
+  media: ./packs/media.yaml
+  fs: ./packs/fs.yaml
+profiles:
+  test:
+    workdir: __TMPDIR__
+    runtimes:
+      python: __PYTHON__
+params:
+  jobs:
+    type: struct_list
+    default:
+      - { name: alpha }
+      - { name: beta }
+locals:
+  out_dir: "${profile.workdir}/out"
+commands:
+  make_dir:
+    run:
+      program: python
+      argv:
+        - -c
+        - $fs.locals.ensure_dir_script
+        - $locals.out_dir
+  write_job:
+    run:
+      program: python
+      argv:
+        - -c
+        - "import pathlib,sys; p=pathlib.Path(sys.argv[1]) / f'{sys.argv[2]}.txt'; p.write_text('ok', encoding='utf-8'); print(p.name)"
+        - $locals.out_dir
+        - $job.name
+pipelines:
+  ingest:
+    steps:
+      - make_dir
+      - step: each_job
+        foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - write_job
+launchers:
+  ingest:
+    title: Ingest
+    use: ingest

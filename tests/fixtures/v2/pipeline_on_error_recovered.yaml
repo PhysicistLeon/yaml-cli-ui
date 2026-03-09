@@ -1,0 +1,25 @@
+version: 2
+profiles:
+  test:
+    runtimes:
+      python: __PYTHON__
+commands:
+  bad:
+    run:
+      program: python
+      argv: [ -c, "import sys; sys.exit(9)" ]
+  recover:
+    run:
+      program: python
+      argv: [ -c, "print('recovered')" ]
+pipelines:
+  flow:
+    steps:
+      - bad
+    on_error:
+      steps:
+        - recover
+launchers:
+  flow:
+    title: Flow
+    use: flow

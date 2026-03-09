@@ -1,0 +1,13 @@
+version: 2
+locals:
+  a: $locals.b
+  b: ok
+commands:
+  c:
+    run:
+      program: python
+      argv: [ -V ]
+launchers:
+  l:
+    title: L
+    use: c

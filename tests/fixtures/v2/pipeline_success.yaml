@@ -1,0 +1,19 @@
+version: 2
+profiles:
+  test:
+    runtimes:
+      python: __PYTHON__
+commands:
+  ok:
+    run:
+      program: python
+      argv: [ -c, "print('ok')" ]
+pipelines:
+  flow:
+    steps:
+      - ok
+      - ok
+launchers:
+  flow:
+    title: Flow
+    use: flow

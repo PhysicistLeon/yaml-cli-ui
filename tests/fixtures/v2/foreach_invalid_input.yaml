@@ -1,0 +1,27 @@
+version: 2
+profiles:
+  test:
+    runtimes:
+      python: __PYTHON__
+params:
+  jobs:
+    type: string
+    default: not-a-list
+commands:
+  ok:
+    run:
+      program: python
+      argv: [ -c, "print('ok')" ]
+pipelines:
+  flow:
+    steps:
+      - step: bad_foreach
+        foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - ok
+launchers:
+  flow:
+    title: Flow
+    use: flow

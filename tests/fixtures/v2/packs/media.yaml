@@ -1,0 +1,17 @@
+version: 2
+imports:
+  fs: ./fs.yaml
+locals:
+  scrape_script: "import pathlib; pathlib.Path('scrape.txt').write_text('scraped', encoding='utf-8'); print('scraped')"
+  transcode_script: "print('transcode')"
+commands:
+  scrape:
+    run:
+      program: python
+      argv:
+        - -c
+        - $locals.scrape_script
+pipelines:
+  media_prepare:
+    steps:
+      - scrape

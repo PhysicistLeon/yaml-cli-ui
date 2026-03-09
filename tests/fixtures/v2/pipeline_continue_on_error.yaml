@@ -1,0 +1,24 @@
+version: 2
+profiles:
+  test:
+    runtimes:
+      python: __PYTHON__
+commands:
+  bad:
+    run:
+      program: python
+      argv: [ -c, "import sys; sys.exit(7)" ]
+  ok:
+    run:
+      program: python
+      argv: [ -c, "print('after')" ]
+pipelines:
+  flow:
+    steps:
+      - use: bad
+        continue_on_error: true
+      - ok
+launchers:
+  flow:
+    title: Flow
+    use: flow

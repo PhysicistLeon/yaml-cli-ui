@@ -1,0 +1,23 @@
+version: 2
+imports:
+  media: ./packs/media.yaml
+  fs: ./packs/fs.yaml
+profiles:
+  dev:
+    workdir: ./work
+params:
+  target_dir:
+    type: string
+    default: ./tmp_target
+locals:
+  root_script: $media.locals.scrape_script
+commands:
+  noop:
+    run:
+      program: python
+      argv:
+        - -V
+launchers:
+  run:
+    title: Run
+    use: noop

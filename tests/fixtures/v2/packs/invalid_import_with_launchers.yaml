@@ -1,0 +1,10 @@
+version: 2
+launchers:
+  x:
+    title: X
+    use: c
+commands:
+  c:
+    run:
+      program: python
+      argv: [ -V ]

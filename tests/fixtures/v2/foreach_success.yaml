@@ -1,0 +1,33 @@
+version: 2
+profiles:
+  test:
+    runtimes:
+      python: __PYTHON__
+params:
+  jobs:
+    type: struct_list
+    default:
+      - { name: a }
+      - { name: b }
+commands:
+  print_job:
+    run:
+      program: python
+      argv:
+        - -c
+        - "import sys; print(sys.argv[1], sys.argv[2])"
+        - $job.name
+        - $loop.index
+pipelines:
+  flow:
+    steps:
+      - step: per_job
+        foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - print_job
+launchers:
+  flow:
+    title: Flow
+    use: flow

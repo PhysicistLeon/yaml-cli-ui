@@ -1,0 +1,14 @@
+version: 2
+commands:
+  same:
+    run:
+      program: python
+      argv: [ -V ]
+pipelines:
+  same:
+    steps:
+      - same
+launchers:
+  run:
+    title: Run
+    use: same

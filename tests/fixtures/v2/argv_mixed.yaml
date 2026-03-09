@@ -1,0 +1,30 @@
+version: 2
+profiles:
+  home:
+    workdir: "/work"
+params:
+  source_url:
+    type: string
+    default: "https://example.com/video"
+  bitrate:
+    type: choice
+    options: [128K, 192K, 320K]
+    default: "192K"
+  embed_thumb:
+    type: bool
+    default: true
+commands:
+  download:
+    run:
+      program: python
+      argv:
+        - --extract-audio
+        - { --audio-format: mp3 }
+        - { --audio-quality: $params.bitrate }
+        - { when: $params.embed_thumb, then: --embed-thumbnail }
+        - { -o: "$profile.workdir/%(title)s.%(ext)s" }
+        - $params.source_url
+launchers:
+  download:
+    title: Download
+    use: download
