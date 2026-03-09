@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 
 from .app import DEFAULT_CONFIG_PATH, load_launch_settings
-
-if TYPE_CHECKING:
-    from .app import App
-    from .app_v2 import AppV2
 
 SUPPORTED_CONFIG_VERSIONS = {1, 2}
 
@@ -72,8 +68,8 @@ def detect_yaml_version(path: str | Path) -> int:
 
 
 def select_app_class_for_version(version: int) -> type[object]:
-    from .app import App
-    from .app_v2 import AppV2
+    from .app import App  # pylint: disable=import-outside-toplevel
+    from .app_v2 import AppV2  # pylint: disable=import-outside-toplevel
 
     if version == 1:
         return App
@@ -91,8 +87,8 @@ def open_app_for_config(
     root: Any | None = None,
     browse_dir: str | Path | None = None,
 ) -> object:
-    from .app import App
-    from .app_v2 import AppV2
+    from .app import App  # pylint: disable=import-outside-toplevel
+    from .app_v2 import AppV2  # pylint: disable=import-outside-toplevel
 
     del root  # Reserved for future tiny glue if embedding root is needed.
 
