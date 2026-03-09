@@ -177,7 +177,7 @@ def test_when_false_does_not_invoke_subprocess(monkeypatch: pytest.MonkeyPatch):
     result = execute_command_def(command, context=_ctx(), step_name="conditional")
 
     assert result.status == StepStatus.SKIPPED
-    assert calls == []
+    assert not calls
 
 
 def test_start_failure_raises_v2_execution_error():

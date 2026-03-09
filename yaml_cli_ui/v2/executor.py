@@ -283,10 +283,12 @@ def _duration_ms(start_perf: float) -> int:
     return max(0, int((perf_counter() - start_perf) * 1000))
 
 
-__all__ = [
+EXECUTOR_PUBLIC_API = (
     "resolve_program",
     "resolve_workdir",
     "build_process_env",
     "execute_command_def",
     "execute_run_spec",
-]
+)
+
+__all__ = list(EXECUTOR_PUBLIC_API)

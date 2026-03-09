@@ -12,6 +12,7 @@ from .context import (
     resolve_selected_profile,
 )
 from .executor import (
+    EXECUTOR_PUBLIC_API,
     build_process_env,
     execute_command_def,
     execute_run_spec,
@@ -75,11 +76,7 @@ __all__ = [
     "serialize_argv_item",
     "is_option_map",
     "is_conditional_item",
-    "resolve_program",
-    "resolve_workdir",
-    "build_process_env",
-    "execute_command_def",
-    "execute_run_spec",
+    *EXECUTOR_PUBLIC_API,
     "resolve_selected_profile",
     "build_base_context",
     "evaluate_root_locals",
