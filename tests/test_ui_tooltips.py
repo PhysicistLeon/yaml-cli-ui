@@ -36,4 +36,4 @@ def test_attach_tooltip_skips_empty_or_non_string_text():
     attach_tooltip(controller, widget, "   ")
     attach_tooltip(controller, widget, None)
 
-    assert widget.bound == {}
+    assert not widget.bound
