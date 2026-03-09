@@ -1,0 +1,47 @@
+version: 2
+
+imports:
+  media: ./packs/media.yaml
+  fs: ./packs/fs.yaml
+
+profiles:
+  local:
+    workdir: .
+    runtimes:
+      python: python
+
+params:
+  collection:
+    type: string
+    default: inbox
+  jobs:
+    type: struct_list
+    default:
+      - { name: alpha }
+      - { name: beta }
+
+locals:
+  spool_root: "${profile.workdir}/tmp/${params.collection}"
+
+commands:
+  prep:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('prepare', '${locals.spool_root}')"
+
+pipelines:
+  ingest:
+    steps:
+      - prep
+      - media.scrape_all
+      - fs.report
+
+launchers:
+  ingest_default:
+    title: Ingest demo
+    info: Demo with imports, foreach and on_error.
+    use: ingest
+    with:
+      collection: inbox
