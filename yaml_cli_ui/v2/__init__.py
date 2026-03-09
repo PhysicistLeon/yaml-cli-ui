@@ -12,11 +12,12 @@ from .context import (
     resolve_selected_profile,
 )
 from .executor import (
-    build_process_env,
-    execute_command_def,
-    execute_run_spec,
-    resolve_program,
-    resolve_workdir,
+    EXECUTOR_PUBLIC_API as _EXECUTOR_PUBLIC_API,
+    build_process_env as build_process_env,
+    execute_command_def as execute_command_def,
+    execute_run_spec as execute_run_spec,
+    resolve_program as resolve_program,
+    resolve_workdir as resolve_workdir,
 )
 from .expr import evaluate_expression, resolve_name
 from .loader import load_v2_document, load_yaml_file, resolve_imports
@@ -75,11 +76,7 @@ __all__ = [
     "serialize_argv_item",
     "is_option_map",
     "is_conditional_item",
-    "resolve_program",
-    "resolve_workdir",
-    "build_process_env",
-    "execute_command_def",
-    "execute_run_spec",
+    *_EXECUTOR_PUBLIC_API,
     "resolve_selected_profile",
     "build_base_context",
     "evaluate_root_locals",
