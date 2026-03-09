@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from .app import DEFAULT_CONFIG_PATH, load_launch_settings
+from .settings import load_launch_settings
+
+DEFAULT_CONFIG_PATH = "examples/yt_audio.yaml"
 
 SUPPORTED_CONFIG_VERSIONS = {1, 2}
 
@@ -67,14 +70,19 @@ def detect_yaml_version(path: str | Path) -> int:
     return version
 
 
+def _load_app_classes() -> tuple[type[object], type[object]]:
+    app_module = importlib.import_module("yaml_cli_ui.app")
+    app_v2_module = importlib.import_module("yaml_cli_ui.app_v2")
+    return app_module.App, app_v2_module.AppV2
+
+
 def select_app_class_for_version(version: int) -> type[object]:
-    from .app import App  # pylint: disable=import-outside-toplevel
-    from .app_v2 import AppV2  # pylint: disable=import-outside-toplevel
+    app_class_v1, app_class_v2 = _load_app_classes()
 
     if version == 1:
-        return App
+        return app_class_v1
     if version == 2:
-        return AppV2
+        return app_class_v2
     raise UnsupportedConfigVersionError(
         f"Unsupported config version {version}; supported versions: 1, 2"
     )
@@ -87,9 +95,6 @@ def open_app_for_config(
     root: Any | None = None,
     browse_dir: str | Path | None = None,
 ) -> object:
-    from .app import App  # pylint: disable=import-outside-toplevel
-    from .app_v2 import AppV2  # pylint: disable=import-outside-toplevel
-
     del root  # Reserved for future tiny glue if embedding root is needed.
 
     config_path = _as_path(path)
@@ -101,10 +106,10 @@ def open_app_for_config(
         settings = load_launch_settings(str(settings_path))
         resolved_browse_dir = settings.get("browse_dir")
 
-    if app_class is App:
-        return App(str(config_path), browse_dir=resolved_browse_dir)
-    if app_class is AppV2:
-        return AppV2(str(config_path))
+    if version == 1:
+        return app_class(str(config_path), browse_dir=resolved_browse_dir)
+    if version == 2:
+        return app_class(str(config_path))
     raise UnsupportedConfigVersionError(
         f"Unsupported config version {version}; supported versions: 1, 2"
     )
