@@ -1,0 +1,28 @@
+version: 2
+
+commands:
+  scrape_one:
+    run:
+      program: python
+      argv:
+        - -c
+        - "import sys; print('scrape=' + sys.argv[1])"
+        - $job.name
+  cleanup:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('cleanup after scrape failure')"
+
+pipelines:
+  scrape_all:
+    steps:
+      - foreach:
+          in: $params.jobs
+          as: job
+          steps:
+            - scrape_one
+    on_error:
+      steps:
+        - cleanup

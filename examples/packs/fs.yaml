@@ -1,0 +1,14 @@
+version: 2
+
+locals:
+  report_script: scripts/report.py
+
+commands:
+  report:
+    run:
+      program: python
+      argv:
+        - -c
+        - "print('report from', '${locals.report_script}')"
+
+pipelines: {}

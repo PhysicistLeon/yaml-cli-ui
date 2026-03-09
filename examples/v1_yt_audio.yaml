@@ -1,0 +1,79 @@
+# Legacy v1 example alias for migration docs/smoke checks.
+# Source-equivalent to examples/yt_audio.yaml.
+
+version: 1
+
+# UI note:
+# - Top-level actions are rendered as buttons in the main window.
+# - Parameters are requested in a modal dialog per action run.
+# - Button colors: idle=neutral, running=yellow, success=green, failed=red.
+
+app:
+  title: CLI YAML Pipeline Engine
+  platform: windows
+  shell: false
+
+
+runtime:
+  python:
+    executable: "C:\\code\\Python\\.venvs\\stable3_12_4\\Scripts\\python.exe"
+
+actions:
+
+  run_script:
+    title: "Run Python script"
+    info: "Runs timer.py via configured Python runtime. Useful for smoke tests."
+    pipeline:
+      - id: run
+        run:
+          program: python
+          argv:
+            - "tests\\timer.py"
+
+  run_script2:
+    title: "Run Python script 2"
+    pipeline:
+      - id: run
+        run:
+          program: python
+          argv:
+            - "tests\\timer copy.py"
+
+  yt_audio:
+    title: Download audio
+    info: "Downloads audio from URL using yt-dlp and saves MP3 into Downloads\\yt"
+    form:
+      fields:
+        - id: url
+          type: string
+          required: true
+        - id: bitrate
+          type: choice
+          options: ["128K", "192K", "320K"]
+          default: "192K"
+        - id: embed
+          type: tri_bool
+          default: auto
+    pipeline:
+      - id: ensure_dir
+        run:
+          program: powershell
+          argv:
+            - -NoProfile
+            - -Command
+            - New-Item -ItemType Directory -Force -Path '${home}\\Downloads\\yt' | Out-Null
+      - id: download
+        run:
+          program: yt-dlp
+          workdir: "${home}\\Downloads\\yt"
+          argv:
+            - "--extract-audio": true
+            - "--audio-format": mp3
+            - opt: --audio-quality
+              from: "${form.bitrate}"
+              mode: value
+            - opt: --embed-thumbnail
+              from: "${form.embed}"
+              mode: flag
+              false_opt: --no-embed-thumbnail
+            - "${form.url}"
