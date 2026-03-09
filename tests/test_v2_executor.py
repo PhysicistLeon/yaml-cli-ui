@@ -43,8 +43,8 @@ def test_resolve_program_falls_back_to_literal_when_override_missing():
 
 def test_resolve_workdir_priority_and_default(tmp_path: Path):
     ctx = _ctx(tmp_path)
-    run = RunSpec(program=sys.executable, workdir="$params.name")
-    assert resolve_workdir(run, ctx) == "demo"
+    run = RunSpec(program=sys.executable, workdir="${profile.workdir}/sub")
+    assert resolve_workdir(run, ctx) == f"{tmp_path}/sub"
 
     run_profile = RunSpec(program=sys.executable)
     assert resolve_workdir(run_profile, ctx) == str(tmp_path)
@@ -160,6 +160,26 @@ def test_when_false_skips_command():
     assert result.stderr is None
 
 
+def test_when_false_does_not_invoke_subprocess(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
+    def _fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("subprocess.run must not be called when command is skipped")
+
+    monkeypatch.setattr("yaml_cli_ui.v2.executor.subprocess.run", _fake_run)
+
+    command = CommandDef(
+        when="${false}",
+        run=RunSpec(program=sys.executable, argv=["-c", "print('should not run')"]),
+    )
+
+    result = execute_command_def(command, context=_ctx(), step_name="conditional")
+
+    assert result.status == StepStatus.SKIPPED
+    assert calls == []
+
+
 def test_start_failure_raises_v2_execution_error():
     run = RunSpec(program="definitely-not-existing-program-xyz")
 
@@ -172,6 +192,17 @@ def test_invalid_env_value_raises_execution_error():
 
     with pytest.raises(V2ExecutionError, match="must render to scalar"):
         build_process_env(run, _ctx())
+
+
+def test_invalid_stream_mode_raises_execution_error():
+    run = RunSpec(
+        program=sys.executable,
+        argv=["-c", "print('x')"],
+        stdout="bad",
+    )
+
+    with pytest.raises(V2ExecutionError, match="unsupported stdout mode"):
+        execute_run_spec(run, context=_ctx(), step_name="badstream")
 
 
 def test_invalid_file_mode_target_raises_execution_error(tmp_path: Path):
